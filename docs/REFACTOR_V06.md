@@ -52,3 +52,9 @@ Packaging now requires `dist/.build-success`, recorded **only** after the full b
 ### ARM64 parse repair (v0.6 NVENC refactor)
 
 The prior function-removal routine mistakenly treated the default argument `NvfJob{}` as the beginning of `NvfEncode`'s function body, leaving ` ) { ... }` at file scope and causing `expected unqualified-id before ')' token`. The complete leftover function body is now removed; a regression guard detects an orphan signature/body. The full ARM64 build and Mariko test remain required.
+
+## Stage 4a: isolate Ambilight session type
+
+The old `NvfSession` implementation is now `VicCaptureSession`, a shared low-level capture owner. The WLED pipeline uses `AmbilightSession final : VicCaptureSession`, while the legacy encoder/USB routines use a distinct `NvfSession final : VicCaptureSession`. Screenshot conversion accepts the VIC base type. **AmbilightSession does not derive from or contain NvfSession.** No VIC memory layout, conversion or timing code changed in this step.
+
+The common VIC owner still has H.264-era fields and methods; `TryNvencStream` is not deleted yet. Source separation is structural, pending ARM64 and device tests.

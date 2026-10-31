@@ -5584,7 +5584,8 @@ namespace ams::mitm::applet {
             return found;
         }
 
-        struct NvfSession {
+        /* Shared, verified VIC capture owner. */
+        struct VicCaptureSession {
             u32 vfd = 0, cmd_handle = 0, vsyncpt = 0, cfg_addr = 0;
             u32 sh = 0, slot_vic = 0, arena_vic = 0;
             NvfCtx x = {};
@@ -5950,7 +5951,7 @@ namespace ams::mitm::applet {
                 return true;
             }
 
-            ~NvfSession() {
+            ~VicCaptureSession() {
                 if (efd_open && !keep_open) {
                     if (x.enc != 0) { UnmapCmdBuffer(x.efd, x.ah); }
                     NvClose(x.efd);
@@ -6572,6 +6573,10 @@ namespace ams::mitm::applet {
             }
         };
 
+        /* WLED capture does not derive from the legacy video-stream session. */
+        struct AmbilightSession final : VicCaptureSession {};
+        struct NvfSession final : VicCaptureSession {}; /* legacy H.264 / UVC */
+
         /* M84: a read fails for one expected reason - the game was closed */
         /* v0.7.16: a game's slot could not be read - it is quitting. Give the
          * donor's Applet-pool memory back at once, as for a game that stopped
@@ -6702,7 +6707,7 @@ namespace ams::mitm::applet {
         }
 
 
-        bool ShotFromSession(const NvfSession &s);
+        bool ShotFromSession(const VicCaptureSession &s);
 
         /* Switch Ambilight: no H.264 encoding, no USB, no PC viewer.
          * Reuses the proven Capture -> VIC path at just 320x180 NV12.
@@ -6710,7 +6715,7 @@ namespace ams::mitm::applet {
         StreamEnd TryAmbilightStream(::ams::svc::Handle dbg, u64 slot_base, u32 vfd, u32 nvmap_fd,
                                     u32 cmd_handle, u32 vsyncpt, u32 cfg_addr, const GameSurface *geo) {
             constexpr u32 W = 320, H = 180;
-            NvfSession s;
+            AmbilightSession s;
             if (geo != nullptr && !s.SetGeometry(*geo, "ambi")) { return StreamEnd::Failed; }
             if (geo != nullptr) { s.PrepareSlots(dbg, slot_base, "ambi"); }
             { u64 rn = 0; u32 sig = 0;
@@ -6796,7 +6801,7 @@ namespace ams::mitm::applet {
 
         /* what the session just read into g_ind_buf: the handheld corner, or
          * the whole surface */
-        bool ShotFromSession(const NvfSession &s) {
+        bool ShotFromSession(const VicCaptureSession &s) {
             /* v0.7.17: the PNG writer reads 4 bytes a pixel - not a 16-bit picture */
             if (vic::Is16Bit(s.src.pixfmt)) { LogLine("shot: a 16-bit picture - no screenshot from the stream"); return false; }
             const u32 shown = s.size_check_ok ? (s.src.w << 16 | s.src.h) : NvfSession::PresentRect(s.src, s.cap_crop);   /* v0.7.13: what the game shows */

@@ -1,5 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Isolate AmbilightSession from the old NvfSession using a common VIC capture owner without changing the proven capture code.
+
 - Fix orphaned `NvfEncode` function body after a source-removal script mistook the `NvfJob{}` default argument for the opening brace.
 - Add a regression check for stray function-signature tails.
 
