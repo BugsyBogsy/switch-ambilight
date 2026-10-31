@@ -1,5 +1,8 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Fix ARM64 build script CRLF line endings; enforce Unix LF for shell files and add regression checks.
+- Fix misleading v0.5.1 output filename in the v0.6 packaging script.
+
 - New own configuration directory with safe legacy fallback.
 - Removed obsolete automatic audio/DVR IPS patch synchronization.
 - Added migration regression test; kept C20/C21, VI/VIC and service names until hardware validation.
