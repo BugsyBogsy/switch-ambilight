@@ -5315,8 +5315,7 @@ namespace ams::mitm::applet {
             std::memcpy(std::addressof(pi), x.a + L.off_status, 4);
             return pi == pic_index;
         }
-
-        int NvfEncode(const NvfCtx &x, u32 pic_index, nvenc_pic_stat_s *st, u64 *enc_ns, const NvfJob &j = NvfJob{}) {
+) {
             u32 fence = 0;
             u64 t0 = 0;
             if (NvfSubmit(x, pic_index, j, std::addressof(fence), std::addressof(t0)) != 0) { *enc_ns = 0; return 1; }
@@ -5503,14 +5502,6 @@ namespace ams::mitm::applet {
                 return why;
             }
         };
-
-        /* the encode's bitstream length, as M81 sized it */
-        u32 NvfBitsLen(const nvenc_pic_stat_s &st) {
-            u32 len = st.total_bit_count / 8 + st.bitstream_start_pos + 16;
-            if (st.last_valid_byte_offset + 1 > len) { len = st.last_valid_byte_offset + 1; }
-            if (len > 0x100000) { len = 0x100000; }   /* the stage buffer's limit */
-            return len;
-        }
 
         /* Everything one real-frame run needs, opened fresh and torn down in
          * reverse: the slot copy pinned for the VIC, the arena pinned for the

@@ -16,4 +16,7 @@ assert "TryAmbilightStream(" in source
 assert "sftambi::Sample(" in source
 assert "NetAmbilightSend(" in source
 assert "struct NvfSession" in source
-print("OK: legacy NVENC probes removed; 320x180 VIC/WLED path retained")
+assert "NvfEncode(" not in source, "Unused encoder wrapper restored"
+assert "NvfBitsLen(" not in source, "Unused H.264 length decoder restored"
+assert "NvfSubmit(" in source and "NvfWaitDone(" in source, "Shared encoder helper moved unexpectedly"
+print("OK: legacy NVENC probes and unused helpers removed; VIC/WLED retained")

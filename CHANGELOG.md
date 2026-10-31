@@ -1,5 +1,9 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove orphan `NvfEncode` and `NvfBitsLen` functions after removing NVENC test callers (fixes ARM64 -Werror=unused-function).
+- Block packaging stale NSPs after unsuccessful builds by checking a successful-build stamp, current Git revision and output checksums.
+- Prevent sysmodule build wrapper from copying outdated NSP outputs on failed compilations.
+
 - Remove NVENC magic/host1x probes, GRC IDR replay and standalone 720p/P-frame/1080p encoder experiments.
 - Disable unused debug arming tokens for the removed NVENC probes; retain VIC capture shared layout and legacy viewer encoder pending extraction.
 - Add NVENC-removal regression tests.

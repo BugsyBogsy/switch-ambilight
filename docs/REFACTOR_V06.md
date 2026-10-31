@@ -42,3 +42,9 @@ Removed NVENC magic/host1x probe, GRC IDR replay, and standalone 720p IDR, P-fra
 **Not yet removed:** the experimental `TryNvencStream` viewer implementation and shared `NvfSession`/`NvfLayout` helpers. Ambilight currently uses those shared helpers for raw VIC output. Deleting the encoder internals requires extracting a lean Ambilight-only session first.
 
 **Safety:** This change passes text-based structural checks, not an ARM64 link or hardware test. Back up C20, compile, test on a Switch, and do not merge this draft until verified.
+
+### NVENC cleanup compile fix and build provenance
+
+The removed NVENC experiment call sites left two unused static helpers, `NvfEncode` and `NvfBitsLen`, which break `-Werror=unused-function`. Both are now deleted; `NvfSubmit` and `NvfWaitDone` remain because the old viewer/encoder is still present.
+
+Packaging now requires `dist/.build-success`, recorded **only** after the full build succeeds, matching the current Git HEAD and all four binary SHA-256 digests. A failed build clears the stamp and previously staged ZIP, so a prior artifact cannot silently be shipped. Re-run `bash scripts/build.sh` before `bash scripts/package.sh` after each checkout or code change.
