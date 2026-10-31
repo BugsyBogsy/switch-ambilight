@@ -5205,7 +5205,20 @@ namespace ams::mitm::applet {
         static_assert(BlOffset(1300, 10, 1920, 4) == Mk8Offset(1300, 10) && BlOffset(1900, 1070, 1920, 4) == Mk8Offset(1900, 1070) &&
                       BlOffset(10, 740, 1920, 4) == Mk8Offset(10, 740) && BlOffset(1279, 719, 1920, 4) == Mk8Offset(1279, 719));
 
-        /* Removed unused 720p slot test after H.264 streaming deletion. */
+        /* All zero outside the top-left 1280x720 means handheld content. */
+        bool SlotContentIs720(const u8 *slot, u32 *out_samples, u32 stride_px, u32 bh_log2) {
+            auto px = [&](u32 x, u32 y) -> const u8 * { return slot + BlOffset(x, y, stride_px, bh_log2); };
+            u32 n = 0;
+            bool zero = true;
+            for (u32 y = 10; y < 1080; y += 100) {
+                for (u32 x = 1300; x < 1920; x += 100) { const u8 *p = px(x, y); zero &= (p[0] | p[1] | p[2]) == 0; ++n; }
+            }
+            for (u32 y = 740; y < 1080; y += 50) {
+                for (u32 x = 10; x < 1280; x += 150) { const u8 *p = px(x, y); zero &= (p[0] | p[1] | p[2]) == 0; ++n; }
+            }
+            *out_samples = n;
+            return zero;
+        }
 
         /* v0.7.3: what a 1080p slot holds, for the 720p/1080p decision. Smash
          * drawing 720p into the corner after docked mode leaves the docked

@@ -1,5 +1,8 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Restore VIC 720p corner probe `SlotContentIs720` wrongly removed as H.264 dead code; capture session still calls it.
+- Add a host C++ test that compiles the production probe and checks simulated 720p/1080p frame selection.
+
 - Remove unused NVENC 1080p layout generation, legacy 720p check and orphaned encoder job stats.
 
 - Make VIC capture truly encoder-free: delete the msenc device opening, channel mapping, encoder clock/stall logic, and encoder context fields.

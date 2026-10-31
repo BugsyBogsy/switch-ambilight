@@ -74,3 +74,7 @@ The capture component now always uses VIC; its `Open` path never opens `/dev/nvh
 ### Post-stream dead-code pruning
 
 Removed the old NVENC 1080p layout factory and unused 720p slot-content test plus orphan NVENC completion globals. The 320x180 VIC raw layout used by WLED remains unchanged.
+
+### VIC corner-probe regression fix
+
+The `SlotContentIs720` function was mistakenly removed during H.264 clean-up, while `VicCaptureSession::Decide` still calls it from `ambi_capture_session.inc`. This breaks ARM64 compile. Restored the exact known working probe and added a host test that compiles production `BlOffset` / `SlotContentIs720` and validates black-outside, lit-outside, and lit-inside 720p corner cases. Future clean-ups must scan every `.inc` and `.hpp` dependency before deleting a function.
