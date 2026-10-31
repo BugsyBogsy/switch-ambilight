@@ -1,21 +1,22 @@
 /*
- * v0.7.12: one key of sdmc:/config/switch-frame-tap/config.ini, read or set
- * in place - for the overlay, which changes single settings ("screen off
- * while streaming") without the manager app's whole-file rewrite. Lines are
- * "key = value"; a key that is not there is added at the end.
+ * Switch Ambilight v0.6: project-owned config with legacy read fallback.
+ * On first edit migrate the full legacy file without modifying it.
  */
 #pragma once
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <sys/stat.h>
 
-namespace sftini {
+namespace ambiini {
 
-    constexpr const char *Path = "sdmc:/config/switch-frame-tap/config.ini";
+    constexpr const char *Path = "sdmc:/config/switch-ambilight/config.ini";
+    constexpr const char *LegacyPath = "sdmc:/config/switch-frame-tap/config.ini";
 
     inline std::string ReadAll() {
         std::string s;
         FILE *f = std::fopen(Path, "rb");
+        if (f == nullptr) { f = std::fopen(LegacyPath, "rb"); }
         if (f == nullptr) { return s; }
         char b[1024];
         size_t n;
@@ -66,6 +67,9 @@ namespace sftini {
             if (!s.empty() && s.back() != '\n') { s += '\n'; }
             s += line + "\n";
         }
+        // The calling NRO/OVL must mount the SD first.
+        (void)::mkdir("sdmc:/config", 0777);
+        (void)::mkdir("sdmc:/config/switch-ambilight", 0777);
         FILE *f = std::fopen(Path, "wb");
         if (f == nullptr) { return false; }
         const bool ok = std::fwrite(s.data(), 1, s.size(), f) == s.size();

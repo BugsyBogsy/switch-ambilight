@@ -54,7 +54,7 @@ namespace ams {
         /* v0.7.13: 96 KB, was 1 MB - every custom sysmodule shares a few MB
          * of the System group with am (#15), and the most ever in use was
          * 17 KB (Run v0713-ballast4-late: a game, the HOME menu, applets),
-         * plus SyncSoundPatches' 44 KB for a moment at boot */
+         * (legacy DVR audio patch syncing removed). */
         constexpr size_t MallocBufferSize = 96_KB;
         alignas(os::MemoryPageSize) constinit u8 g_malloc_buffer[MallocBufferSize];
 
@@ -567,58 +567,7 @@ namespace ams {
          * Nothing touches nvdrv/VIC unless sdmc:/applet-mitm.armed exists and
          * contains "vic". Default is a pure observer, i.e. M7d behaviour. */
         /* Called once per flag at boot; the file is a single short line. */
-        /* v0.7.4: "Sound in no-record games" (common/sound_patch.hpp) is a copy
-         * of the bundled dvr-patches in atmosphere/exefs_patches. While it is
-         * on, refresh that copy from the bundle - an update of Switch Frame Tap
-         * brings patches for a new firmware, and am reads them next boot. */
-        void SyncSoundPatches() {
-            constexpr const char *Bundled = "sdmc:/config/switch-frame-tap/dvr-patches";
-            constexpr const char *Ours    = "sdmc:/atmosphere/exefs_patches/switch-frame-tap-sound";
-            fs::DirectoryEntryType t;
-            if (R_FAILED(fs::GetEntryType(std::addressof(t), Ours)) || t != fs::DirectoryEntryType_Directory) { return; }
-            fs::DirectoryHandle d;
-            if (R_FAILED(fs::OpenDirectory(std::addressof(d), Bundled, fs::OpenDirectoryMode_File))) { return; }
-            /* v0.7.13: from malloc for this moment at boot, not 44 KB of .bss
-             * (the System group, #15) */
-            struct Scratch { fs::DirectoryEntry entries[48]; u8 a[4096], b[4096]; };
-            std::unique_ptr<Scratch> scratch(new (std::nothrow) Scratch);
-            if (!scratch) { fs::CloseDirectory(d); return; }
-            fs::DirectoryEntry *entries = scratch->entries;
-            s64 n = 0;
-            const Result rr = fs::ReadDirectory(std::addressof(n), entries, d, 48);
-            fs::CloseDirectory(d);
-            if (R_FAILED(rr)) { return; }
-            u32 updated = 0, same = 0;
-            u8 *a = scratch->a, *b = scratch->b;
-            auto read_all = [](const char *path, u8 *buf, size_t cap, size_t *len) -> bool {
-                fs::FileHandle f;
-                if (R_FAILED(fs::OpenFile(std::addressof(f), path, fs::OpenMode_Read))) { return false; }
-                s64 sz = 0;
-                bool ok = R_SUCCEEDED(fs::GetFileSize(std::addressof(sz), f)) && sz > 0 && static_cast<size_t>(sz) <= cap &&
-                          R_SUCCEEDED(fs::ReadFile(f, 0, buf, static_cast<size_t>(sz)));
-                fs::CloseFile(f);
-                *len = ok ? static_cast<size_t>(sz) : 0;
-                return ok;
-            };
-            for (s64 i = 0; i < n; ++i) {
-                const char *name = entries[i].name;
-                const size_t nl = std::strlen(name);
-                if (nl < 5 || (std::strcmp(name + nl - 4, ".ips") != 0 && std::strcmp(name + nl - 4, ".IPS") != 0)) { continue; }
-                char from[256], to[256];
-                std::snprintf(from, sizeof(from), "%s/%s", Bundled, name);
-                std::snprintf(to, sizeof(to), "%s/%s", Ours, name);
-                size_t la = 0, lb = 0;
-                if (!read_all(from, a, sizeof(scratch->a), std::addressof(la))) { continue; }
-                if (read_all(to, b, sizeof(scratch->b), std::addressof(lb)) && la == lb && std::memcmp(a, b, la) == 0) { ++same; continue; }
-                fs::DeleteFile(to);
-                fs::FileHandle f;
-                if (R_SUCCEEDED(fs::CreateFile(to, static_cast<s64>(la))) && R_SUCCEEDED(fs::OpenFile(std::addressof(f), to, fs::OpenMode_Write))) {
-                    if (R_SUCCEEDED(fs::WriteFile(f, 0, a, la, fs::WriteOption::Flush))) { ++updated; }
-                    fs::CloseFile(f);
-                }
-            }
-            mitm::applet::LogLine("sound in no-record games: on (dvr-patches, %u current, %u refreshed from the bundle)", same, updated);
-        }
+
 
         size_t ReadFileText(const char *path, char *buf, size_t cap) {
             fs::FileHandle f;
@@ -664,7 +613,10 @@ namespace ams {
                 return;
             }
             static char ini[4096];
-            const size_t n = ReadFileText("sdmc:/config/switch-frame-tap/config.ini", ini, sizeof(ini));
+            size_t n = ReadFileText("sdmc:/config/switch-ambilight/config.ini", ini, sizeof(ini));
+            if (n == 0) {
+                n = ReadFileText("sdmc:/config/switch-frame-tap/config.ini", ini, sizeof(ini));
+            }
             mitm::applet::AmbiApply(ambiset::Parse(ini, n));
             g_arm_len = mitm::applet::armfile::BuildReleaseArm(ini, n, g_arm_buf, sizeof(g_arm_buf));
         }
@@ -1151,7 +1103,7 @@ namespace ams {
                                   HOSVER_MAJOR(hv), HOSVER_MINOR(hv), HOSVER_MICRO(hv),
                                   ATMOSPHERE_RELEASE_VERSION_MAJOR, ATMOSPHERE_RELEASE_VERSION_MINOR, ATMOSPHERE_RELEASE_VERSION_MICRO);
         }
-        SyncSoundPatches();
+        // Historical DVR/audio patch syncing removed in v0.6.
 
         mitm::applet::g_vic_armed   = ArmFileContains("vic");
         mitm::applet::g_vic_execute = ArmFileContains("exec");
@@ -1199,7 +1151,7 @@ namespace ams {
         mitm::applet::NoteAlbumPath();   /* v0.7.11: for the manager's gallery */
         mitm::applet::g_audio_enabled.store(ArmFileContains("audio"));
         mitm::applet::LogLine("install type from GetEntryType(sdmc:/applet-mitm.armed) rc=0x%x", mitm::applet::g_arm_probe_rc);
-        mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, sdmc:/config/switch-frame-tap/config.ini ->" : "TEST install, sdmc:/applet-mitm.armed",
+        mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, Ambilight config (legacy fallback) ->" : "TEST install, sdmc:/applet-mitm.armed",
                               static_cast<int>(g_arm_len), g_arm_buf);
         /* live is a mode of the H.264 stream: everything nvstream sets up, it needs */
         if (mitm::applet::g_live_armed) { mitm::applet::g_nvstream_armed = true; }
@@ -1400,11 +1352,11 @@ namespace ams::mitm::applet {
      * these globals at the start of a session; the request makes it end the
      * current one (StreamEnd::Reconfigure) so the next starts with them. */
     void ReloadReleaseConfig() {
-        if (!g_release_mode) { LogLine("sftap: ReloadConfig ignored - test install (arm file)"); return; }
+        if (!g_release_mode) { LogLine("ambi: ReloadConfig ignored - test install (arm file)"); return; }
         ::ams::g_arm_loaded = false;
         ::ams::LoadArm();
         ::ams::ApplySessionSettings();
-        LogLine("sftap: config reloaded -> %.*s", static_cast<int>(::ams::g_arm_len), ::ams::g_arm_buf);
+        LogLine("ambi: config reloaded -> %.*s", static_cast<int>(::ams::g_arm_len), ::ams::g_arm_buf);
         g_reconfig_request.store(true, std::memory_order_relaxed);
     }
 

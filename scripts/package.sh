@@ -23,6 +23,6 @@ cp ambilight-manager/switch-ambilight.nro "$STAGE/switch/switch-ambilight/switch
 # The package contains a sample separately so it never overwrites existing settings.
 mkdir -p "$ROOT/dist"
 cp config.example.ini "$ROOT/dist/config.example.ini"
-(cd "$STAGE" && zip -qr "$ROOT/dist/switch-ambilight-v0.5.1-switch.zip" atmosphere switch)
+(cd "$STAGE" && zip -qr "$ROOT/dist/switch-ambilight-v0.6.0-switch.zip" atmosphere switch)
 printf 'Complete SD package: %s\n' "$ROOT/dist/switch-ambilight-v0.5.1-switch.zip"
 printf 'No existing config.ini is overwritten. See README before installing.\n'

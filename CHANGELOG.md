@@ -1,3 +1,10 @@
+## Unreleased - v0.6.0 (refactor candidate)
+
+- New own configuration directory with safe legacy fallback.
+- Removed obsolete automatic audio/DVR IPS patch synchronization.
+- Added migration regression test; kept C20/C21, VI/VIC and service names until hardware validation.
+- Full USB/H.264/audio source removal is still pending.
+
 # Changelog
 
 ## 0.5.1 (source packaging)
