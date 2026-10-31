@@ -1,5 +1,9 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove `audout:u` interception, sound-memory probes and automatic audio-thread startup.
+- Explicitly disable audio capture in both config entrypoints; retain legacy NVENC audio helpers temporarily for ABI/build safety.
+- Add standalone-audio regression checks.
+
 - Fix ARM64 build script CRLF line endings; enforce Unix LF for shell files and add regression checks.
 - Fix the test runner's broken shell quoting and add a ZIP packaging fallback using Python 3.
 - Fix misleading v0.5.1 output filename in the v0.6 packaging script.

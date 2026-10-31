@@ -24,3 +24,13 @@ This is an incremental cleanup and migration, **not a complete removal of Switch
 5. Confirm the new config is created after changing a setting and that the old config is untouched.
 
 No release tag until the sysmodule is verified on a real Switch.
+
+## Stage 2: remove standalone audio interceptors
+
+- Removed the `audout:u` MITM service source and its service loop (`applet_mitm_audout.cpp/.hpp`).
+- Removed the audio-memory research scanner (`applet_mitm_soundprobe.cpp/.hpp`).
+- No longer starts the `grc:d` audio polling thread.
+- Audio is explicitly forced off regardless of any stale `audio=1` setting or debug armed token.
+- The compatibility audio ring helpers in `applet_mitm_audio.cpp/.hpp` and associated legacy NVENC branch remain until the H.264 code path is removed; **this is deliberately not a complete audio-source deletion**.
+
+CI checks that the standalone audio interceptors are absent and the VIC Ambilight function is still present. Host tests do not compile a Switch sysmodule; Docker ARM64 build and device testing are required before merge.

@@ -26,3 +26,7 @@ Voir le [README anglais](README.md) pour les instructions détaillées, les limi
 ## v0.6 : état
 
 La configuration est migrée vers `config/switch-ambilight/config.ini` lors de la première sauvegarde, avec lecture de secours de l'ancien fichier. La synchronisation des patchs audio historiques est supprimée. **Le moteur de capture et le lanceur utilisent encore du code hérité de Switch Frame Tap** ; la compilation et les essais sur console restent indispensables.
+
+### Nettoyage audio v0.6 (branche de développement)
+
+L'intercepteur `audout:u`, les sondes audio et le démarrage de la capture audio ont été supprimés. Les utilitaires audio liés à l'ancien NVENC subsistent temporairement. **Nouvelle étape à compiler et tester sur Switch avant fusion.**

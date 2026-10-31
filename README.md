@@ -93,3 +93,7 @@ This is a **GPL-2.0 licensed derivative** of [Switch Frame Tap](https://github.c
 ## v0.6 development status
 
 Config now lives under `config/switch-ambilight/config.ini`, retaining legacy fallback and first-write migration. The audio/DVR patch synchronizer is removed. The graphics capture and donor still retain Switch Frame Tap code, so this is **not a full rewrite**. This candidate requires Docker compilation and Mariko regression testing. See [refactoring checklist](docs/REFACTOR_V06.md).
+
+### v0.6 audio cleanup (development branch)
+
+The experimental `audout:u` interceptor, sound probes and audio capture thread startup have been removed from this branch. The NVENC-era audio helper source remains while its associated encoder code is being audited. **Not hardware-tested at this refactoring stage.**

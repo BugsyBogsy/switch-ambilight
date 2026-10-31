@@ -17,7 +17,6 @@
 #include "applet_mitm_sm.hpp"
 #include "applet_mitm_donor.hpp"
 #include "applet_mitm_am.hpp"
-#include "applet_mitm_audout.hpp"
 #include "applet_mitm_log.hpp"
 #include "applet_mitm_nv.hpp"
 #include "applet_mitm_nvdrv.hpp"
@@ -32,7 +31,6 @@
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_uibinder.hpp"
 #include "applet_mitm_uisource.hpp"
-#include "applet_mitm_soundprobe.hpp"
 #include "applet_mitm_ovlprobe.hpp"
 #include "applet_mitm_overlay.hpp"
 #include "applet_mitm_featmem.hpp"
@@ -637,7 +635,7 @@ namespace ams {
             mitm::applet::g_shot_mask.store(mitm::applet::armfile::Number(g_arm_buf, g_arm_len, "shotmask", 0) & sft::shotbuttons::AllButtons);
             mitm::applet::g_shot_capture.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotcap"));
             mitm::applet::g_shot_album.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotalbum"));
-            mitm::applet::g_audio_enabled.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "audio"));
+            mitm::applet::g_audio_enabled.store(false); /* WLED-only: no audio capture */
             mitm::applet::g_nvab_armed = mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nvab");
             /* on unless config sets detach_on_home=0 (nodethome) */
             mitm::applet::g_detach_on_home = !mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nodethome");
@@ -1149,7 +1147,7 @@ namespace ams {
         mitm::applet::g_shot_capture.store(ArmFileContains("shotcap"));
         mitm::applet::g_shot_album.store(ArmFileContains("shotalbum"));
         mitm::applet::NoteAlbumPath();   /* v0.7.11: for the manager's gallery */
-        mitm::applet::g_audio_enabled.store(ArmFileContains("audio"));
+        mitm::applet::g_audio_enabled.store(false); /* audio stays disabled */
         mitm::applet::LogLine("install type from GetEntryType(sdmc:/applet-mitm.armed) rc=0x%x", mitm::applet::g_arm_probe_rc);
         mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, Ambilight config (legacy fallback) ->" : "TEST install, sdmc:/applet-mitm.armed",
                               static_cast<int>(g_arm_len), g_arm_buf);
@@ -1249,8 +1247,6 @@ namespace ams {
         mitm::applet::StartControlService();
         mitm::applet::StartAppWatch();
         mitm::applet::StartShotInput();   /* idle, and hid untouched, until screenshots are on */
-        mitm::applet::StartAudio();
-        mitm::applet::SoundProbeStart();   /* v0.7.14 research: off without probe-sound.txt */
         mitm::applet::OvlProbeStart();     /* v0.7.14 research: off without probe-ovl.txt */
         mitm::applet::StartNet();         /* v0.7: only with "net"; waits for the console to be online */       /* idle, and grc:d untouched, until audio is on */
         mitm::applet::StartVicWorker();
@@ -1287,7 +1283,7 @@ namespace ams {
         if (mitm::applet::g_hb_docked.load()) { mitm::applet::LogLine("am: homebrew from the Homebrew Menu is told the console is docked (homebrew_docked)"); }
         if (ArmFileContains("noam")) { mitm::applet::LogLine("am: not wrapped (noam)"); } else { mitm::applet::StartAmMitm(); }
         /* v0.7.17: a game's audout:u - its own PCM for the stream when nothing else carries its sound (PokeMMO) */
-        if (ArmFileContains("noaudout")) { mitm::applet::LogLine("audout: not wrapped (noaudout)"); } else { mitm::applet::StartAudOutMitm(); }
+        /* WLED-only: never intercept audout:u or start an audio recorder. */
         /* v0.1.1: after vi:u, and wrapping only the running application's own
          * sessions (ShouldMitm asks pm:dmnt) */
         /* v0.7.1: "nohb" (config homebrew = 0, not in the manager) leaves vi:m

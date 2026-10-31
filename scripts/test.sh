@@ -24,3 +24,6 @@ done
 "$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tests/config_migration_test.cpp" -o "$TEST_DIR/config_migration"
 mkdir "$TEST_DIR/migration"
 (cd "$TEST_DIR/migration" && "$TEST_DIR/config_migration")
+
+# Verify standalone cleanup without needing the Switch toolchain.
+python3 "$ROOT/tests/legacy_audio_cleanup_test.py"
