@@ -2,8 +2,6 @@ name: Switch ARM64 build
 on:
   push:
     branches: [refactor/v0.6-core]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

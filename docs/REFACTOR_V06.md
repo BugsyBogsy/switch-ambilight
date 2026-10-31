@@ -58,3 +58,7 @@ The prior function-removal routine mistakenly treated the default argument `NvfJ
 The old `NvfSession` implementation is now `VicCaptureSession`, a shared low-level capture owner. The WLED pipeline uses `AmbilightSession final : VicCaptureSession`, while the legacy encoder/USB routines use a distinct `NvfSession final : VicCaptureSession`. Screenshot conversion accepts the VIC base type. **AmbilightSession does not derive from or contain NvfSession.** No VIC memory layout, conversion or timing code changed in this step.
 
 The common VIC owner still has H.264-era fields and methods; `TryNvencStream` is not deleted yet. Source separation is structural, pending ARM64 and device tests.
+
+## Stage 4b: H.264 streaming removed
+
+Removed `TryNvencStream`, its game/HOME/probe entrypoints, and the orphaned NVENC submit, wait and poll helpers. The working VIC -> WLED loop was kept intact. Other encoder-era layouts, debug scanner and raw UVC remain pending cleanup. This requires a successful ARM64 build and hardware test before release.

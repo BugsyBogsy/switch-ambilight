@@ -9,3 +9,6 @@ a=s[s.rfind("StreamEnd TryAmbilightStream("):s.find("/* ---- M99:",s.rfind("Stre
 assert "AmbilightSession s;" in a and "NvfSession s;" not in a
 assert "bool ShotFromSession(const VicCaptureSession &s)" in s
 print("OK: AmbilightSession independent from NvfSession; shared VIC capture retained")
+
+assert "TryNvencStream(" not in s
+assert "NvfSubmit(" not in s and "NvfWaitDone(" not in s

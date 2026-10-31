@@ -1,5 +1,8 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove the H.264 streaming implementation and three dispatch paths; use Ambilight capture for WLED.
+- Drop orphaned encoder submit/wait/poll functions; other H.264 layouts and debug probes still require audit.
+
 - Isolate AmbilightSession from the old NvfSession using a common VIC capture owner without changing the proven capture code.
 
 - Fix orphaned `NvfEncode` function body after a source-removal script mistook the `NvfJob{}` default argument for the opening brace.
