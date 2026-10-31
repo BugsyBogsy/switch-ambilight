@@ -1,0 +1,9 @@
+ref
+.git
+dist
+**/build
+**/out
+*.log
+*.nsp
+*.nro
+*.ovl

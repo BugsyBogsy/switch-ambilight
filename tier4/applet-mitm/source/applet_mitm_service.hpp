@@ -1,0 +1,206 @@
+/*
+ * applet-mitm - Track B / M3: tap the game's frame pipeline (the binder)
+ *
+ * Chain:
+ *   vi:u.GetDisplayService(0)          -> wrap IApplicationDisplayService
+ *     .OpenDisplay(1010)               -> log (manual forward; proves liveness)
+ *     .GetRelayService(100)            -> wrap IHOSBinderDriver
+ *       .TransactParcelAuto(3)         -> LOG every IGraphicBufferProducer txn
+ *
+ * Why the binder and not OpenLayer:
+ *   OpenLayer was only a route to aruid+layer_id. But every frame the game
+ *   presents goes through the binder as an IGraphicBufferProducer transaction
+ *   (dequeueBuffer/queueBuffer), and requestBuffer replies carry the
+ *   GraphicBuffer descriptor (nvmap handle, stride, format). That IS the frame
+ *   data path. It also sidesteps OpenLayer's PID-descriptor problem entirely:
+ *   TransactParcelAuto has no pid.
+ *
+ * OpenLayer/CreateStrayLayer are deliberately NOT declared - declaring
+ * OpenLayer is the one thing that made games fail to launch (its dispatch
+ * rejects; libstratosphere's sf::ClientProcessId needs a raw u64 placeholder
+ * that this command does not have, and there is no way to express
+ * "send_pid without placeholder").
+ *
+ * ABI notes (verified against libnx):
+ *   GetRelayService: cmd 100, no input, one out object.
+ *   TransactParcel:  fw >= 3.0.0 uses cmd 3 (Auto) with AutoSelect buffers;
+ *                    cmd 0 (MapAlias) is the pre-3.0.0 form. We are on 22.5.0,
+ *                    so we declare cmd 3 only.
+ *                    raw in = { s32 session_id, u32 code, u32 flags } = 12B.
+ *   IGraphicBufferProducer codes: 1=requestBuffer 2=setBufferCount
+ *     3=dequeueBuffer 4=detachBuffer 5=detachNextBuffer 6=attachBuffer
+ *     7=queueBuffer 8=cancelBuffer 9=query 10=connect 11=disconnect
+ */
+#pragma once
+#include <stratosphere.hpp>
+#include "applet_mitm_uibinder.hpp"
+#include "applet_mitm_uisource.hpp"
+#include "applet_mitm_overlay.hpp"
+
+namespace ams::mitm::applet {
+    struct DisplayName { char data[0x40]; };
+    static_assert(sizeof(DisplayName) == 0x40);
+}
+
+/* ---- IHOSBinderDriver wrapper (innermost - declare first) -------------- */
+#define AMS_VI_BINDER_MITM_INTERFACE_INFO(C, H) \
+    AMS_SF_METHOD_INFO(C, H, 0, Result, TransactParcel,     (s32 session_id, u32 code, u32 flags, const sf::InBuffer &parcel_in, const sf::OutBuffer &parcel_out), (session_id, code, flags, parcel_in, parcel_out)) \
+    AMS_SF_METHOD_INFO(C, H, 3, Result, TransactParcelAuto, (s32 session_id, u32 code, u32 flags, const sf::InAutoSelectBuffer &parcel_in, const sf::OutAutoSelectBuffer &parcel_out), (session_id, code, flags, parcel_in, parcel_out))
+
+AMS_SF_DEFINE_MITM_INTERFACE(ams::mitm::applet, IBinderMitm, AMS_VI_BINDER_MITM_INTERFACE_INFO, 0x2AB1E141)
+
+/* ---- IApplicationDisplayService wrapper ------------------------------- */
+#define AMS_VI_DISPLAYSVC_MITM_INTERFACE_INFO(C, H)                                                                                                                            \
+    AMS_SF_METHOD_INFO(C, H, 100,  Result, GetRelayService, (sf::Out<sf::SharedPointer<ams::mitm::applet::IBinderMitm>> out), (out))                                            \
+    AMS_SF_METHOD_INFO(C, H, 101,  Result, GetSystemDisplayService, (sf::Out<sf::SharedPointer<ams::mitm::applet::IUiSysDisplayMitm>> out), (out))                              \
+    AMS_SF_METHOD_INFO(C, H, 1010, Result, OpenDisplay,     (const ams::mitm::applet::DisplayName &display_name, sf::Out<u64> out_display_id), (display_name, out_display_id))
+
+AMS_SF_DEFINE_MITM_INTERFACE(ams::mitm::applet, IViDisplaySvcMitm, AMS_VI_DISPLAYSVC_MITM_INTERFACE_INFO, 0x2AB1E142)
+
+/* ---- vi:u root wrapper --------------------------------------------- */
+/* M87: command 1, GetDisplayServiceWithProxyNameExchange, is how some games
+ * (BOTW in Run M) open the display service; left undeclared it auto-forwards
+ * and the game's binder never passes through us. Its arguments differ between
+ * sources (switchbrew: a u32; SwIPC's vi:s/vi:m variants: 8-byte ProxyName +
+ * u32), so it is declared with NO typed input: the handler copies the game's
+ * raw request and forwards those bytes unchanged. */
+#define AMS_VI_ROOT_MITM_INTERFACE_INFO(C, H) \
+    AMS_SF_METHOD_INFO(C, H, 0, Result, GetDisplayService, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out, u32 mode), (out, mode)) \
+    AMS_SF_METHOD_INFO(C, H, 1, Result, GetDisplayServiceWithProxyNameExchange, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out), (out))
+
+AMS_SF_DEFINE_MITM_INTERFACE(ams::mitm::applet, IViRootMitm, AMS_VI_ROOT_MITM_INTERFACE_INFO, 0x2AB1E143)
+
+/* ---- v0.1.1: vi:m root wrapper, for homebrew ---------------------------
+ * libnx's viInitialize(ViServiceType_Default) tries vi:m first, then vi:s,
+ * then vi:u (libnx nx/source/services/vi.c _viInitialize), so every libnx app
+ * - forwarders on the HOME menu included - presents through vi:m, which games
+ * cannot open. The root is IManagerRootService: 2 GetDisplayService(u32),
+ * 3 GetDisplayServiceWithProxyNameExchange. Only the process that IS the
+ * running application is wrapped (ShouldMitm); qlaunch, am, the overlay
+ * loader and every other vi:m user get the real service. */
+#define AMS_VI_MANAGER_ROOT_MITM_INTERFACE_INFO(C, H) \
+    AMS_SF_METHOD_INFO(C, H, 2, Result, GetDisplayService, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out, u32 mode), (out, mode)) \
+    AMS_SF_METHOD_INFO(C, H, 3, Result, GetDisplayServiceWithProxyNameExchange, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out), (out))
+
+AMS_SF_DEFINE_MITM_INTERFACE(ams::mitm::applet, IViManagerRootMitm, AMS_VI_MANAGER_ROOT_MITM_INTERFACE_INFO, 0x2AB1E144)
+
+#define AMS_VI_SYSTEM_ROOT_MITM_INTERFACE_INFO(C, H) \
+    AMS_SF_METHOD_INFO(C, H, 1, Result, GetDisplayService, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out, u32 mode), (out, mode)) \
+    AMS_SF_METHOD_INFO(C, H, 3, Result, GetDisplayServiceWithProxyNameExchange, (sf::Out<sf::SharedPointer<ams::mitm::applet::IViDisplaySvcMitm>> out), (out))
+
+AMS_SF_DEFINE_MITM_INTERFACE(ams::mitm::applet, IViSystemRootMitm, AMS_VI_SYSTEM_ROOT_MITM_INTERFACE_INFO, 0x2AB1E147)
+
+namespace ams::mitm::applet {
+
+    class BinderMitm : public sf::MitmServiceImplBase {
+        public:
+            using MitmServiceImplBase::MitmServiceImplBase;
+            static bool ShouldMitm(const sm::MitmProcessInfo &) { return true; }
+        public:
+            /* v0.7.17: games built before firmware 3.0.0 (Fast RMX, #41) use command 0 */
+            Result TransactParcel(s32 session_id, u32 code, u32 flags, const sf::InBuffer &parcel_in, const sf::OutBuffer &parcel_out);
+            Result TransactParcelAuto(s32 session_id, u32 code, u32 flags, const sf::InAutoSelectBuffer &parcel_in, const sf::OutAutoSelectBuffer &parcel_out);
+        private:
+            Result Transact(s32 session_id, u32 code, u32 flags, const void *in, size_t in_size, size_t out_size);
+        public:
+    };
+    static_assert(IsIBinderMitm<BinderMitm>);
+
+    class ViDisplaySvcMitm : public sf::MitmServiceImplBase {
+        public:
+            using MitmServiceImplBase::MitmServiceImplBase;
+            static bool ShouldMitm(const sm::MitmProcessInfo &) { return true; }
+        public:
+            Result GetRelayService(sf::Out<sf::SharedPointer<IBinderMitm>> out);
+            /* v0.7.14 probe4: wrapped for library applets only; everyone else gets vi's own */
+            Result GetSystemDisplayService(sf::Out<sf::SharedPointer<IUiSysDisplayMitm>> out);
+            Result OpenDisplay(const DisplayName &display_name, sf::Out<u64> out_display_id);
+    };
+    static_assert(IsIViDisplaySvcMitm<ViDisplaySvcMitm>);
+
+    class ViRootMitm : public sf::MitmServiceImplBase {
+        public:
+            using MitmServiceImplBase::MitmServiceImplBase;
+        public:
+            static bool ShouldMitm(const sm::MitmProcessInfo &client_info) {
+                return ncm::IsApplicationId(client_info.program_id) && !client_info.override_status.IsHbl();
+            }
+        public:
+            Result GetDisplayService(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out, u32 mode);
+            Result GetDisplayServiceWithProxyNameExchange(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out);
+        private:
+            void Wrap(::Service disp_svc, sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> &out);
+    };
+    static_assert(IsIViRootMitm<ViRootMitm>);
+
+    /* a game's binder transaction (queueBuffer, setPreallocatedBuffer...) -
+     * vi:u's or vi:m's relay, or v0.7.14 dispdrv for the Album */
+    void GameBinderTransaction(const sm::MitmProcessInfo &ci, s32 session_id, u32 code, u32 flags, const void *in, size_t in_size, size_t out_size);
+
+    /* shared by the vi:u and vi:m roots: forward a root command that returns
+     * the display service, and wrap what it returns */
+    Result ForwardGetDisplayService(::Service *fwd, u32 cmd, u32 mode, const sm::MitmProcessInfo &ci, sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> &out);
+    void WrapDisplayService(::Service disp_svc, const sm::MitmProcessInfo &ci, sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> &out);
+    /* plain_cmd: the root's GetDisplayService (vi:u 0, vi:s 1, vi:m 2), the fallback when the request cannot be read */
+    Result ForwardProxyNameExchange(::Service *fwd, u32 cmd, const u8 *msg, const sm::MitmProcessInfo &ci, sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> &out, u32 plain_cmd);
+
+    /* v0.1.1: the running application's pid, refreshed every 100 ms by its
+     * own thread (StartAppWatch). NEVER ask pm from ShouldMitm: sm waits on
+     * our answer synchronously (sm_service_manager.cpp GetMitmServiceHandleImpl,
+     * and aborts if it fails), and pm can be waiting on sm while it launches a
+     * program - a deadlock that would freeze the console. */
+    extern std::atomic<u64> g_app_pid;
+
+    inline bool IsRunningApplication(os::ProcessId pid) {
+        const u64 ap = g_app_pid.load(std::memory_order_relaxed);
+        return ap != 0 && ap == pid.value;
+    }
+    void StartAppWatch();
+
+    /* v0.7.1: libstratosphere's out-object session pairs, made through sm */
+    Result CreateSessionViaSm(os::NativeHandle *out_server, os::NativeHandle *out_client);
+    u32 SessionsMadeViaSm();   /* v0.7.13 diagnostic */
+
+    class ViManagerRootMitm : public sf::MitmServiceImplBase {
+        public:
+            using MitmServiceImplBase::MitmServiceImplBase;
+        public:
+            /* no IPC here (see g_app_pid). Applications and forwarders have
+             * program ids from 0x0100000000010000 up; system programs are
+             * below it, and 0x42... is where homebrew sysmodules live - the
+             * Tesla/Ultrahand overlay loader (0x420000000007E51A) among them.
+             * A forwarder with another id is caught by the pid once the
+             * watcher has seen it. */
+            static bool ShouldMitm(const sm::MitmProcessInfo &client_info) {
+                const u64 tid = client_info.program_id.value;
+                const bool app_range = tid >= UINT64_C(0x0100000000010000) && (tid >> 56) != 0x42;
+                /* v0.7.14 probe4: and the library applets, with probe-ui.txt */
+                const bool applet = g_ui_vi_mitm.load(std::memory_order_relaxed) && IsLibraryApplet(tid);
+                /* v0.7.14: and hbmenu - the homebrew loader in the Album's place - with home_menu on */
+                const bool hbmenu = g_ui_stream_armed && tid == UINT64_C(0x010000000000100D) && client_info.override_status.IsHbl();
+                /* v0.7.14: Tesla's sessions, with the overlays (or their probe) on - their presents say when it shows; never captured */
+                const bool tesla = tid == TeslaProgramId && g_ovl_vi_mitm.load(std::memory_order_relaxed);
+                return app_range || applet || hbmenu || tesla || IsRunningApplication(client_info.process_id);
+            }
+        public:
+            Result GetDisplayService(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out, u32 mode);
+            Result GetDisplayServiceWithProxyNameExchange(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out);
+    };
+    static_assert(IsIViManagerRootMitm<ViManagerRootMitm>);
+
+    /* v0.7.14 probe4: vi:s (ISystemRootService: 1 GetDisplayService, 3 the
+     * proxy-name variant), library applets only, with probe-ui.txt */
+    class ViSystemRootMitm : public sf::MitmServiceImplBase {
+        public:
+            using MitmServiceImplBase::MitmServiceImplBase;
+        public:
+            static bool ShouldMitm(const sm::MitmProcessInfo &client_info) {
+                return g_ui_vi_mitm.load(std::memory_order_relaxed) && IsLibraryApplet(client_info.program_id.value);
+            }
+        public:
+            Result GetDisplayService(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out, u32 mode);
+            Result GetDisplayServiceWithProxyNameExchange(sf::Out<sf::SharedPointer<IViDisplaySvcMitm>> out);
+    };
+    static_assert(IsIViSystemRootMitm<ViSystemRootMitm>);
+
+}

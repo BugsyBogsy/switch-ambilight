@@ -1,0 +1,30 @@
+# External dependencies (downloaded by setup.sh)
+/ref/
+# Build outputs, packaged files and temporary source patches
+**/build/
+**/out/
+**/*.o
+**/*.d
+**/*.gch/
+**/*.a
+**/*.elf
+**/*.nso
+**/*.nsp
+**/*.npdm
+**/*.nro
+**/*.ovl
+**/*.nacp
+**/*.map
+build/
+dist/
+*.log
+# Local backups, test artifacts, captured logs and personal settings
+.ambilight-backup-*/
+*.armed
+config.ini
+.env
+.env.*
+.vscode/
+.idea/
+.DS_Store
+__pycache__/

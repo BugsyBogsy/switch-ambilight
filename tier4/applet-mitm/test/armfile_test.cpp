@@ -1,0 +1,206 @@
+/*
+ * Host test for applet_mitm_armfile.hpp - the arm file decides which probes
+ * touch hardware, so a parsing bug is a hardware bug. Run before every build
+ * that changes flags:
+ *
+ *   g++ -std=c++20 -Wall -Wextra -I../source armfile_test.cpp -o armfile_test && ./armfile_test
+ */
+#include "applet_mitm_armfile.hpp"
+#include <cstdio>
+#include <cstring>
+
+namespace af = ams::mitm::applet::armfile;
+
+static int g_fail = 0;
+
+static void ExpectContains(const char *file, const char *key, bool want) {
+    const bool got = af::Contains(file, std::strlen(file), key);
+    if (got != want) { std::printf("FAIL Contains(\"%s\", \"%s\") = %d, want %d\n", file, key, got, want); ++g_fail; }
+}
+
+static void ExpectNumber(const char *file, const char *key, unsigned def, unsigned want) {
+    const unsigned got = af::Number(file, std::strlen(file), key, def);
+    if (got != want) { std::printf("FAIL Number(\"%s\", \"%s\", %u) = %u, want %u\n", file, key, def, got, want); ++g_fail; }
+}
+
+static void ExpectRelease(const char *ini, const char *want) {
+    char out[256];
+    const size_t n = af::BuildReleaseArm(ini, std::strlen(ini), out, sizeof(out));
+    if (n == 0 || std::strcmp(out, want) != 0) { std::printf("FAIL BuildReleaseArm(\"%s\") = \"%s\", want \"%s\"\n", ini, n ? out : "", want); ++g_fail; }
+}
+
+int main() {
+    /* M75's failure, and its whole class */
+    ExpectContains("vic grcscan wait=90", "grc", false);
+    ExpectContains("vic grcscan wait=90", "grcscan", true);
+    ExpectContains("vic grcscan wait=90", "vic", true);
+    ExpectContains("vic grcscan wait=90", "wait", true);
+    ExpectContains("jpgdec", "jpg", false);
+    /* M80: "nvgrc" must never arm the grc IPC interceptor */
+    ExpectContains("vic nvgrc wait=60", "grc", false);
+    ExpectContains("vic nvgrc wait=60", "nvgrc", true);
+    ExpectContains("vic nvgrc wait=60", "nvenc", false);
+    /* M81: Run G's exact arm file */
+    ExpectContains("vic nvgrc grcscan wait=60\n", "grc", false);
+    ExpectContains("vic nvgrc grcscan wait=60\n", "nvgrc", true);
+    ExpectContains("vic nvgrc grcscan wait=60\n", "grcscan", true);
+    ExpectContains("vic nvgrc grcscan wait=60\n", "jpgdec", false);
+    ExpectNumber("vic nvgrc grcscan wait=60\n", "wait", 120, 60);
+    /* M82: Run H's exact arm file */
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "grc", false);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "nvframe", true);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "csc", true);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "exec", true);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "dbg", true);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "nvenc", false);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "stream", false);
+    ExpectContains("vic exec dbg csc nvframe wait=60\n", "dump", false);
+    ExpectNumber("vic exec dbg csc nvframe wait=60\n", "nvframe", 120, 120);
+    ExpectNumber("vic exec dbg csc nvframe=60 wait=60\n", "nvframe", 120, 60);
+    /* M83: Run I's exact arm file. "nvstream" must not arm the raw "stream",
+     * "nvp" must not read "nvqp", and neither may arm "grc". */
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "grc", false);
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "stream", false);
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "nvstream", true);
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "nvp", true);
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "usb", true);
+    ExpectContains("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "nvqp", false);
+    ExpectNumber("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "nvstream", 3600, 3600);
+    ExpectNumber("vic exec dbg usb csc nvframe nvstream nvp wait=60\n", "nvqp", 20, 20);
+    /* M85: Run K's exact arm file. "nvgop" is a new number; it must not arm
+     * "nvp" or "grc", and "nvp" must still be read on its own. */
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "grc", false);
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "stream", false);
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvstream", true);
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvp", true);
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvframe", false);
+    ExpectContains("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "csc", false);
+    ExpectNumber("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvgop", 0, 60);
+    ExpectNumber("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvstream", 3600, 3600);
+    ExpectNumber("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvqp", 20, 20);
+    ExpectNumber("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "nvp", 30, 30);
+    ExpectNumber("vic exec dbg usb nvstream nvgop=60 nvp wait=60\n", "wait", 120, 60);
+    /* M86: Run L's exact arm file. "live" is new and implies nvstream in
+     * main.cpp; it must not read as anything else. */
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "live", true);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "grc", false);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "stream", false);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "nvstream", false);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "nvp", false);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "usb", true);
+    ExpectNumber("vic exec dbg usb nvgop=60 live wait=20\n", "nvgop", 0, 60);
+    ExpectNumber("vic exec dbg usb nvgop=60 live wait=20\n", "wait", 120, 20);
+    /* M90: Run Q's exact arm file (docked: no usb). nvframe re-checks the
+     * refactored 720p path on docked content; "nv1080" is new. */
+    ExpectContains("vic exec dbg nvframe nv1080 wait=60\n", "nv1080", true);
+    ExpectContains("vic exec dbg nvframe nv1080 wait=60\n", "grc", false);
+    ExpectContains("vic exec dbg nvframe nv1080 wait=60\n", "nvframe", true);
+    ExpectNumber("vic exec dbg nvframe nv1080 wait=60\n", "nvframe", 120, 120);
+    ExpectContains("vic exec dbg nvframe nv1080 wait=60\n", "live", false);
+    ExpectContains("vic exec dbg nvframe nv1080 wait=60\n", "usb", false);
+    ExpectNumber("vic exec dbg nvframe nv1080 wait=60\n", "nv1080", 120, 120);
+    ExpectNumber("vic exec dbg nvframe nv1080 wait=60\n", "wait", 120, 60);
+    /* M93: "cap720" (optional) must not arm anything else */
+    ExpectContains("vic exec dbg usb nvgop=60 live cap720 wait=20\n", "cap720", true);
+    ExpectContains("vic exec dbg usb nvgop=60 live wait=20\n", "cap720", false);
+    ExpectContains("vic exec dbg usb nvgop=60 live cap720 wait=20\n", "live", true);
+    ExpectNumber("vic exec dbg usb nvstream=7200 nvqp=24 nvp=15\n", "nvstream", 3600, 7200);
+    ExpectNumber("vic exec dbg usb nvstream=7200 nvqp=24 nvp=15\n", "nvqp", 20, 24);
+    ExpectNumber("vic exec dbg usb nvstream=7200 nvqp=24 nvp=15\n", "nvp", 30, 15);
+    ExpectContains("vic exec dbg usb nvqp=24\n", "nvp", false);
+    ExpectContains("jpg jpgdec", "jpg", true);
+    ExpectContains("clk\n", "clk", true);
+    ExpectContains("vic\r\nclk\r\n", "clk", true);
+    ExpectContains("", "vic", false);
+    ExpectContains("vic", "", false);
+
+    /* M76: the same class in ArmFileNumber */
+    ExpectNumber("sweep stream sw=768 sh=432", "sw", 0, 768);
+    ExpectNumber("sweep stream sw=768 sh=432", "sh", 0, 432);
+    ExpectNumber("sweep stream", "sw", 0, 0);
+    ExpectNumber("vic grcscan wait=90", "wait", 120, 90);
+    ExpectNumber("vic grcscan", "wait", 120, 120);
+    ExpectNumber("sframes=600 q=70", "q", 85, 70);
+    ExpectNumber("sequence=3 q=70", "q", 85, 70);
+    ExpectNumber("mtx", "mtx", 1, 1);
+    ExpectNumber("mtx=2", "mtx", 1, 2);
+    ExpectNumber("wait=", "wait", 120, 120);
+    ExpectNumber("wait=9x", "wait", 120, 120);
+    ExpectNumber("clk=5", "clk", 0, 5);
+
+    /* a NUL inside the buffer ends parsing, as the old C-string code did */
+    {
+        const char buf[] = { 'v', 'i', 'c', '\0', 'c', 'l', 'k' };
+        if (af::Contains(buf, sizeof(buf), "clk")) { std::printf("FAIL: token after NUL was parsed\n"); ++g_fail; }
+        if (!af::Contains(buf, sizeof(buf), "vic")) { std::printf("FAIL: token before NUL missed\n"); ++g_fail; }
+    }
+
+    /* M98: the release config */
+    ExpectRelease("", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("# comment\nquality = medium\n", "vic exec dbg usb live nvqp=24 nvgop=60 wait=20 audio");
+    ExpectRelease("[stream]\r\nquality=low\r\nkeyframe_interval = 30\r\nmax_resolution = 720\r\n", "vic exec dbg usb live nvqp=28 nvgop=30 wait=20 cap720 audio");
+    ExpectRelease("quality=high\nqp=22\nstart_delay=5\n", "vic exec dbg usb live nvqp=22 nvgop=60 wait=5 audio");
+    ExpectRelease("qp=99\nkeyframe_interval=0\nstart_delay=-3\nmax_resolution=4k\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("; quality=low\n#qp=30\nallow_untested_firmware = 1", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 anyfw audio");
+    ExpectRelease("myquality=low\nquality_x=low\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    /* v0.3: audio is on unless audio = 0 */
+    ExpectRelease("audio = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20");
+    ExpectRelease("audio = 1\nquality = low\n", "vic exec dbg usb live nvqp=28 nvgop=60 wait=20 audio");
+    /* v0.4: webcam mode */
+    ExpectRelease("usb_mode = webcam\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio uvc");
+    ExpectRelease("usb_mode = viewer\naudio = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20");
+    ExpectRelease("usb_mode = Webcam2\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    /* v0.6: the bitrate experiment */
+    ExpectRelease("encoder_test = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio nvab");
+    /* v0.7: the network transport */
+    ExpectRelease("network = 1\nquality = medium\n", "vic exec dbg net live nvqp=24 nvgop=60 wait=20 audio");
+    ExpectRelease("homebrew = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio nohb");
+    /* v0.7: one connection at a time */
+    ExpectRelease("connection = network\n", "vic exec dbg net live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("connection = webcam\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio uvc");
+    /* v0.7.7: the uncompressed webcam */
+    ExpectRelease("connection = webcam-any\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio uvc uvcraw");
+    ExpectRelease("usb_mode = webcam\nconnection = webcam-any\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio uvc uvcraw");
+    ExpectRelease("connection = webcam-anything\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("connection = usb\nusb_mode = webcam\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("usb_mode = webcam\nconnection = network\n", "vic exec dbg net live nvqp=20 nvgop=60 wait=20 audio");
+    /* M99: screenshots */
+    ExpectRelease("screenshot = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=0 audio");
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 2\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=2 audio");
+    ExpectRelease("screenshot = 0\nscreenshot_buttons = 2\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 9\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=0 audio");
+    /* a comment word must not arm a flag the way an arm-file token would */
+    ExpectRelease("# grc dump nvp\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    /* default on; only detach_on_home=0 emits nodethome */
+    ExpectRelease("detach_on_home = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio nodethome");
+    /* v0.7.12: early collection (PR #12) - on by default, 0 or ab emit a token */
+    ExpectRelease("early_collect = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio earlyoff");
+    ExpectRelease("early_collect = ab\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio earlyab");
+    ExpectRelease("early_collect = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    /* v0.7.12: screen off while streaming */
+    ExpectRelease("screen_off = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio screenoff");
+    ExpectRelease("screen_off = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("detach_on_home = 0\nscreen_off = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio nodethome screenoff");
+    /* v0.7.11: screenshots next to the system's */
+    ExpectRelease("screenshot = 1\nscreenshot_location = album\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=0 shotalbum audio");
+    ExpectRelease("screenshot = 1\nscreenshot_location = app\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=0 audio");
+    /* v0.7.11: custom combos (ZR = bit 9 = 512, Down = bit 15 = 32768) */
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 4\nscreenshot_custom = ZR+Down+Capture\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=4 shotmask=33280 shotcap audio");
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 4\nscreenshot_custom = zr + down\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=4 shotmask=33280 audio");
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 4\nscreenshot_custom = Capture\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=4 shotmask=0 shotcap audio");
+    ExpectRelease("screenshot = 1\nscreenshot_buttons = 4\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 shot shotkey=0 audio");
+    ExpectRelease("detach_on_home = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    /* v0.7.14: the HOME menu and the overlays (beta) */
+    ExpectRelease("home_menu = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio homemenu");
+    ExpectRelease("overlays = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio overlays");
+    ExpectRelease("overlays = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectRelease("home_menu = 1\noverlays = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio homemenu overlays");
+    /* v0.7.18: homebrew told the console is docked */
+    ExpectRelease("homebrew_docked = 1\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio hbdocked");
+    ExpectRelease("homebrew_docked = 0\n", "vic exec dbg usb live nvqp=20 nvgop=60 wait=20 audio");
+    ExpectContains("vic live nodethome wait=20\n", "nodethome", true);
+    ExpectContains("vic live wait=20\n", "nodethome", false);
+
+    std::printf("%s (%d failure%s)\n", g_fail == 0 ? "OK" : "FAILED", g_fail, g_fail == 1 ? "" : "s");
+    return g_fail == 0 ? 0 : 1;
+}

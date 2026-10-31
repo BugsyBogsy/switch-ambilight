@@ -1,0 +1,327 @@
+/*
+ * T210 VIC 4.0 (class NVB0B6, host1x class 0x5D) configuration structs.
+ *
+ * Transcribed verbatim from libdrm tests/tegra/vic40.h
+ * (Copyright (c) 2016-2018 NVIDIA Corporation, MIT). GCC aarch64 packs u64
+ * bitfields LSB-first, matching the per-field bit comments in that header.
+ *
+ * sizeof(VicConfigStruct) must be 1552 (0x610); SET_CONTROL_PARAMS wants
+ * (1552 / 16) << 16 = 97 << 16.
+ */
+#pragma once
+#include <stratosphere.hpp>
+
+/* ---- NVENC (host1x class 0x21) ------------------------------------------
+ * Method addresses from NVIDIA's published clc5b7.h. They are usable on our
+ * far older engine for the same reason the VIC ones are: NVCEB6's
+ * SET_OUTPUT_SURFACE_LUMA_OFFSET is byte-identical to the 0x720 we proved on
+ * NVB0B6, i.e. the host1x method ABI is stable across generations. */
+namespace ams::mitm::applet::nvenc {
+
+    constexpr u32 HOST1X_CLASS_NVENC      = 0x21;
+
+    constexpr u32 SET_APPLICATION_ID      = 0x00000200;
+    constexpr u32 APPLICATION_ID_H264     = 1;
+    constexpr u32 EXECUTE                 = 0x00000300;
+    constexpr u32 SET_CONTROL_PARAMS      = 0x00000700;
+    constexpr u32 CONTROL_CODEC_H264      = 3;
+    constexpr u32 SET_PICTURE_INDEX       = 0x00000704;
+    constexpr u32 SET_IN_DRV_PIC_SETUP    = 0x00000710;
+    constexpr u32 SET_OUT_ENC_STATUS      = 0x00000718;
+    constexpr u32 SET_OUT_BITSTREAM       = 0x0000071C;
+    constexpr u32 SET_IOHISTORY           = 0x00000720;
+    constexpr u32 SET_OUT_REF_PIC_LUMA    = 0x00000730;
+    constexpr u32 SET_IN_CUR_PIC          = 0x00000734;
+    constexpr u32 SET_IN_CUR_PIC_CHROMA_U = 0x00000740;
+    constexpr u32 SET_OUT_REF_PIC_CHROMA  = 0x0000074C;
+
+    /* The firmware validates the magic and REPORTS rather than hanging, which
+     * is what makes probing the generation safe by construction. */
+    constexpr u32 ERR_NONE                = 0x00000000;
+    constexpr u32 ERR_H264_INVALID_INPUT  = 0x30000002;
+    constexpr u32 ERR_H264_BAD_MAGIC      = 0x30000004;
+
+    inline const char *ErrName(u32 e) {
+        switch (e) {
+            case ERR_NONE:               return "NONE - the engine accepted the job";
+            case 0x30000001:             return "APPTIMER_EXPIRED";
+            case ERR_H264_INVALID_INPUT: return "INVALID_INPUT - magic ACCEPTED, config incomplete";
+            case 0x30000003:             return "HWERR_INTERRUPT";
+            case ERR_H264_BAD_MAGIC:     return "BAD_MAGIC - wrong NVENC generation";
+            default:                     return "unknown";
+        }
+    }
+
+}
+
+namespace ams::mitm::applet::vic {
+
+    /* method register byte-offsets (value pushed as method >> 2) */
+    constexpr u32 SET_APPLICATION_ID              = 0x00000200;
+    constexpr u32 EXECUTE                         = 0x00000300;
+    constexpr u32 SET_SURFACE0_SLOT0_LUMA_OFFSET  = 0x00000400;
+    /* v0.7.14 ovl2: the other slots' surfaces. 0x400-0x6FF holds 8 slots x 8
+     * surfaces (fields) x {luma, chroma U, chroma V}, slot-major: a slot's
+     * surface 0 is 0x60 past the previous slot's. Not in libdrm (it only
+     * uses slot 0) or NVIDIA's later class headers (they moved the table to
+     * 0x1200); Ryujinx's VicRegisters lays it out this way, and the same
+     * layout puts SET_CONTROL_PARAMS at 0x704, SET_CONFIG_STRUCT_OFFSET at
+     * 0x708 and the output surface at 0x720, all proven here. */
+    constexpr u32 SlotSurfaceStride = 0x60;
+    constexpr u32 SlotLumaOffsetMethod(u32 slot) { return SET_SURFACE0_SLOT0_LUMA_OFFSET + slot * SlotSurfaceStride; }
+    static_assert(SlotLumaOffsetMethod(8) == 0x700);
+    /* blending factor selects (libdrm vic.h VIC_BLEND_*): what slot n's
+     * colour and alpha are multiplied by (Src) and what the result so far is
+     * multiplied by (Dst) - K1/K2 are BlendingSlotStruct's AlphaK1/AlphaK2,
+     * 1023 = 1.0; "SRC"/"DST" in the names are the alphas */
+    constexpr u32 BLEND_SRCFACTC_K1 = 0, BLEND_SRCFACTC_K1_TIMES_DST = 1, BLEND_SRCFACTC_NEG_K1_TIMES_DST = 2,
+                  BLEND_SRCFACTC_K1_TIMES_SRC = 3, BLEND_SRCFACTC_ZERO = 4;
+    constexpr u32 BLEND_DSTFACTC_K1 = 0, BLEND_DSTFACTC_K2 = 1, BLEND_DSTFACTC_K1_TIMES_DST = 2,
+                  BLEND_DSTFACTC_NEG_K1_TIMES_DST = 3, BLEND_DSTFACTC_NEG_K1_TIMES_SRC = 4,
+                  BLEND_DSTFACTC_ZERO = 5, BLEND_DSTFACTC_ONE = 6;
+    constexpr u32 BLEND_SRCFACTA_K1 = 0, BLEND_SRCFACTA_K2 = 1, BLEND_SRCFACTA_NEG_K1_TIMES_DST = 2, BLEND_SRCFACTA_ZERO = 3;
+    constexpr u32 BLEND_DSTFACTA_K2 = 0, BLEND_DSTFACTA_NEG_K1_TIMES_SRC = 1, BLEND_DSTFACTA_ZERO = 2, BLEND_DSTFACTA_ONE = 3;
+    constexpr u32 SET_CONTROL_PARAMS              = 0x00000704;
+    constexpr u32 SET_CONFIG_STRUCT_OFFSET        = 0x00000708;
+    constexpr u32 SET_OUTPUT_SURFACE_LUMA_OFFSET  = 0x00000720;
+    /* M63: libdrm documents only the luma offset, which is why NV12 output was
+     * refused in M59 rather than guessed at - a wrong register hangs the VIC and
+     * takes the compositor with it. NVIDIA's own published class header
+     * (open-gpu-doc classes/video/clceb6.h) defines all three, and its luma
+     * value is byte-identical to the 0x720 we already proved on hardware, which
+     * validates the pair below. */
+    constexpr u32 SET_OUTPUT_SURFACE_CHROMA_U_OFFSET = 0x00000724;
+    constexpr u32 SET_OUTPUT_SURFACE_CHROMA_V_OFFSET = 0x00000728;
+
+    constexpr u32 HOST1X_CLASS_VIC = 0x5D;
+    /* nvhost "uclass" method regs for a VIC channel */
+    constexpr u32 UCLASS_INCR_SYNCPT   = 0x00;
+    constexpr u32 UCLASS_METHOD_OFFSET = 0x10;
+    constexpr u32 UCLASS_METHOD_DATA   = 0x11;
+
+    /* Declaring an increment in the submit's syncpt_incrs only tells nvhost to
+     * raise the syncpoint's *max*. The increment itself must be programmed into
+     * the command stream, or the syncpoint never reaches the fence - our wait
+     * times out and every other client of that syncpoint (nvnflinger composites
+     * on the VIC!) stalls forever. libdrm does this via
+     * drm_tegra_pushbuf_sync_cond: NONINCR(0x0,1) then cond<<shift | syncpt_id.
+     * VIC 4.0 reports version 0x21 -> cond_shift 8. */
+    /* SETCL selects which engine's register space the following opcodes address.
+     * libdrm omits it because the DRM kernel driver emits it from job->class;
+     * nvservices' CHANNEL_SUBMIT may not, so we emit it ourselves. Harmless if
+     * the class was already VIC. mask=0 means "set class, write no registers". */
+    constexpr u32 Host1xOpcodeSetClass(u32 offset, u32 class_id, u32 mask) {
+        return (UINT32_C(0) << 28) | ((offset & 0xFFF) << 16) | ((class_id & 0x3FF) << 6) | (mask & 0x3F);
+    }
+
+    constexpr u32 Host1xOpcodeIncr(u32 offset, u32 count) {
+        return (UINT32_C(1) << 28) | ((offset & 0xFFF) << 16) | (count & 0xFFFF);
+    }
+
+    constexpr u32 Host1xOpcodeNonIncr(u32 offset, u32 count) {
+        return (UINT32_C(2) << 28) | ((offset & 0xFFF) << 16) | (count & 0xFFFF);
+    }
+    constexpr u32 INCR_SYNCPT_COND_IMMEDIATE = 0;
+    constexpr u32 INCR_SYNCPT_COND_OP_DONE   = 1;
+    constexpr u32 INCR_SYNCPT_COND_SHIFT     = 8;
+
+    /* pixel formats (libdrm vic.h + VIC NVB0B6 table).
+     * 32/33/34 are consecutive: A8R8G8B8, A8B8G8R8, R8G8B8A8. The game's
+     * swapchain buffers are A8B8G8R8 (NvColorFormat 0x0100532120). */
+    constexpr u32 PIXFMT_A8R8G8B8 = 32;
+    /* v0.7.17: 16-bit RGB (open-gpu-doc vic_ceb6_types.h: T_B5G6R5 9,
+     * T_R5G6B5 10) - libnx's RGB565 framebuffer, NvColorFormat_R5G6B5
+     * (0x010A881210, DBI #42). Named the other way round from NvColorFormat,
+     * as the 32-bit ones are (NvColorFormat A8B8G8R8 reads as the VIC's
+     * A8R8G8B8): R5G6B5 is read as the VIC's B5G6R5. */
+    constexpr u32 PIXFMT_B5G6R5 = 9;
+    constexpr u32 PIXFMT_R5G6B5 = 10;
+    constexpr bool Is16Bit(u32 fmt) { return fmt == PIXFMT_B5G6R5 || fmt == PIXFMT_R5G6B5; }
+    constexpr u32 PIXFMT_A8B8G8R8 = 33;
+    constexpr u32 PIXFMT_R8G8B8A8 = 34;
+    /* NV12 - semi-planar Y + interleaved UV at half resolution in both axes.
+     * 1.5 bytes/pixel against RGBA's 4: a 2.67x bandwidth reduction produced by
+     * the engine for free, and the input format NVENC requires. From
+     * ref/libdrm-vic/vic.h VIC_PIXEL_FORMAT_Y8_U8V8_N420. */
+    constexpr u32 PIXFMT_Y8_U8V8_N420 = 67;   /* NV12 */
+    constexpr u32 PIXFMT_Y8_V8U8_N420 = 68;   /* NV21 */
+
+    constexpr bool IsNv12(u32 fmt) { return fmt == PIXFMT_Y8_U8V8_N420 || fmt == PIXFMT_Y8_V8U8_N420; }
+    /* block kinds */
+    constexpr u32 BLK_KIND_PITCH        = 0;
+    constexpr u32 BLK_KIND_GENERIC_16Bx2 = 1;
+    /* cache widths */
+    /* Which are legal per libdrm vic.h: BL = block-linear 16Bx2, PL = pitch.
+     * 64Bx4 and 128Bx2 are valid for both; 16Bx16/32Bx8 are BL only. */
+    constexpr u32 CACHE_WIDTH_16Bx16 = 0;   /* BL only */
+    constexpr u32 CACHE_WIDTH_32Bx8  = 1;   /* BL only */
+    constexpr u32 CACHE_WIDTH_64Bx4  = 2;   /* BL + PL */
+    constexpr u32 CACHE_WIDTH_128Bx2 = 3;   /* BL + PL */
+    constexpr u32 CACHE_WIDTH_256Bx1 = 4;   /* PL only */
+
+    #pragma pack(push, 1)
+
+    typedef struct {
+        u64 SlotEnable : 1;
+        u64 DeNoise : 1;
+        u64 AdvancedDenoise : 1;
+        u64 CadenceDetect : 1;
+        u64 MotionMap : 1;
+        u64 MMapCombine : 1;
+        u64 IsEven : 1;
+        u64 ChromaEven : 1;
+        u64 CurrentFieldEnable : 1;
+        u64 PrevFieldEnable : 1;
+        u64 NextFieldEnable : 1;
+        u64 NextNrFieldEnable : 1;
+        u64 CurMotionFieldEnable : 1;
+        u64 PrevMotionFieldEnable : 1;
+        u64 PpMotionFieldEnable : 1;
+        u64 CombMotionFieldEnable : 1;
+        u64 FrameFormat : 4;
+        u64 FilterLengthY : 2;
+        u64 FilterLengthX : 2;
+        u64 Panoramic : 12;
+        u64 reserved1 : 22;
+        u64 DetailFltClamp : 6;
+        u64 FilterNoise : 10;
+        u64 FilterDetail : 10;
+        u64 ChromaNoise : 10;
+        u64 ChromaDetail : 10;
+        u64 DeinterlaceMode : 4;
+        u64 MotionAccumWeight : 3;
+        u64 NoiseIir : 11;
+        u64 LightLevel : 4;
+        u64 reserved4 : 2;
+        u64 SoftClampLow : 10;
+        u64 SoftClampHigh : 10;
+        u64 reserved5 : 3;
+        u64 reserved6 : 9;
+        u64 PlanarAlpha : 10;
+        u64 ConstantAlpha : 1;
+        u64 StereoInterleave : 3;
+        u64 ClipEnabled : 1;
+        u64 ClearRectMask : 8;
+        u64 DegammaMode : 2;
+        u64 reserved7 : 1;
+        u64 DecompressEnable : 1;
+        u64 reserved9 : 5;
+        u64 DecompressCtbCount : 8;
+        u64 DecompressZbcColor : 32;
+        u64 reserved12 : 24;
+        u64 SourceRectLeft : 30;
+        u64 reserved14 : 2;
+        u64 SourceRectRight : 30;
+        u64 reserved15 : 2;
+        u64 SourceRectTop : 30;
+        u64 reserved16 : 2;
+        u64 SourceRectBottom : 30;
+        u64 reserved17 : 2;
+        u64 DestRectLeft : 14;
+        u64 reserved18 : 2;
+        u64 DestRectRight : 14;
+        u64 reserved19 : 2;
+        u64 DestRectTop : 14;
+        u64 reserved20 : 2;
+        u64 DestRectBottom : 14;
+        u64 reserved21 : 2;
+        u64 reserved22 : 32;
+        u64 reserved23 : 32;
+    } SlotConfig;
+
+    typedef struct {
+        u64 SlotPixelFormat : 7;
+        u64 SlotChromaLocHoriz : 2;
+        u64 SlotChromaLocVert : 2;
+        u64 SlotBlkKind : 4;
+        u64 SlotBlkHeight : 4;
+        u64 SlotCacheWidth : 3;
+        u64 reserved0 : 10;
+        u64 SlotSurfaceWidth : 14;
+        u64 SlotSurfaceHeight : 14;
+        u64 reserved1 : 4;
+        u64 SlotLumaWidth : 14;
+        u64 SlotLumaHeight : 14;
+        u64 reserved2 : 4;
+        u64 SlotChromaWidth : 14;
+        u64 SlotChromaHeight : 14;
+        u64 reserved3 : 4;
+    } SlotSurfaceConfig;
+
+    typedef struct {
+        u64 luma_coeff0 : 20; u64 luma_coeff1 : 20; u64 luma_coeff2 : 20; u64 luma_r_shift : 4;
+        u64 luma_coeff3 : 20; u64 LumaKeyLower : 10; u64 LumaKeyUpper : 10; u64 LumaKeyEnabled : 1;
+        u64 reserved0 : 2; u64 reserved1 : 21;
+    } LumaKeyStruct;
+
+    typedef struct {
+        u64 matrix_coeff00 : 20; u64 matrix_coeff10 : 20; u64 matrix_coeff20 : 20; u64 matrix_r_shift : 4;
+        u64 matrix_coeff01 : 20; u64 matrix_coeff11 : 20; u64 matrix_coeff21 : 20; u64 reserved0 : 3; u64 matrix_enable : 1;
+        u64 matrix_coeff02 : 20; u64 matrix_coeff12 : 20; u64 matrix_coeff22 : 20; u64 reserved1 : 4;
+        u64 matrix_coeff03 : 20; u64 matrix_coeff13 : 20; u64 matrix_coeff23 : 20; u64 reserved2 : 4;
+    } MatrixStruct;
+
+    typedef struct {
+        u64 ClearRect0Left : 14; u64 reserved0 : 2; u64 ClearRect0Right : 14; u64 reserved1 : 2;
+        u64 ClearRect0Top : 14; u64 reserved2 : 2; u64 ClearRect0Bottom : 14; u64 reserved3 : 2;
+        u64 ClearRect1Left : 14; u64 reserved4 : 2; u64 ClearRect1Right : 14; u64 reserved5 : 2;
+        u64 ClearRect1Top : 14; u64 reserved6 : 2; u64 ClearRect1Bottom : 14; u64 reserved7 : 2;
+    } ClearRectStruct;
+
+    typedef struct {
+        u64 AlphaK1 : 10; u64 reserved0 : 6; u64 AlphaK2 : 10; u64 reserved1 : 6;
+        u64 SrcFactCMatchSelect : 3; u64 reserved2 : 1; u64 DstFactCMatchSelect : 3; u64 reserved3 : 1;
+        u64 SrcFactAMatchSelect : 3; u64 reserved4 : 1; u64 DstFactAMatchSelect : 3; u64 reserved5 : 1;
+        u64 reserved6 : 4; u64 reserved7 : 4; u64 reserved8 : 4; u64 reserved9 : 4;
+        u64 reserved10 : 2; u64 OverrideR : 10; u64 OverrideG : 10; u64 OverrideB : 10; u64 OverrideA : 10;
+        u64 reserved11 : 2; u64 UseOverrideR : 1; u64 UseOverrideG : 1; u64 UseOverrideB : 1; u64 UseOverrideA : 1;
+        u64 MaskR : 1; u64 MaskG : 1; u64 MaskB : 1; u64 MaskA : 1; u64 reserved12 : 12;
+    } BlendingSlotStruct;
+
+    typedef struct {
+        u64 AlphaFillMode : 3; u64 AlphaFillSlot : 3; u64 BackgroundAlpha : 10;
+        u64 BackgroundR : 10; u64 BackgroundG : 10; u64 BackgroundB : 10;
+        u64 RegammaMode : 2; u64 OutputFlipX : 1; u64 OutputFlipY : 1; u64 OutputTranspose : 1;
+        u64 reserved1 : 1; u64 reserved2 : 12;
+        u64 TargetRectLeft : 14; u64 reserved3 : 2; u64 TargetRectRight : 14; u64 reserved4 : 2;
+        u64 TargetRectTop : 14; u64 reserved5 : 2; u64 TargetRectBottom : 14; u64 reserved6 : 2;
+    } OutputConfig;
+
+    typedef struct {
+        u64 OutPixelFormat : 7; u64 OutChromaLocHoriz : 2; u64 OutChromaLocVert : 2;
+        u64 OutBlkKind : 4; u64 OutBlkHeight : 4; u64 reserved0 : 3; u64 reserved1 : 10;
+        u64 OutSurfaceWidth : 14; u64 OutSurfaceHeight : 14; u64 reserved2 : 4;
+        u64 OutLumaWidth : 14; u64 OutLumaHeight : 14; u64 reserved3 : 4;
+        u64 OutChromaWidth : 14; u64 OutChromaHeight : 14; u64 reserved4 : 4;
+    } OutputSurfaceConfig;
+
+    typedef struct {
+        u64 DownsampleHoriz : 11; u64 reserved0 : 5; u64 DownsampleVert : 11; u64 reserved1 : 5;
+        u64 reserved2 : 32; u64 reserved3 : 32; u64 reserved4 : 32;
+    } PipeConfig;
+
+    typedef struct {
+        SlotConfig slotConfig;
+        SlotSurfaceConfig slotSurfaceConfig;
+        LumaKeyStruct lumaKeyStruct;
+        MatrixStruct colorMatrixStruct;
+        MatrixStruct gamutMatrixStruct;
+        BlendingSlotStruct blendingSlotStruct;
+    } SlotStruct;
+
+    typedef struct {
+        PipeConfig pipeConfig;
+        OutputConfig outputConfig;
+        OutputSurfaceConfig outputSurfaceConfig;
+        MatrixStruct outColorMatrixStruct;
+        ClearRectStruct clearRectStruct[4];
+        SlotStruct slotStruct[8];
+    } VicConfigStruct;
+
+    #pragma pack(pop)
+
+    static_assert(sizeof(SlotConfig) == 64);
+    static_assert(sizeof(SlotStruct) == 176);
+    static_assert(sizeof(VicConfigStruct) == 1552);
+
+}
