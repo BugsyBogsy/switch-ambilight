@@ -1,5 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Fix 720p probe host fixture to allocate padded 0x870000 block-linear framebuffer rather than a smaller linear 1920x1088x4 buffer.
+
 - Restore VIC 720p corner probe `SlotContentIs720` wrongly removed as H.264 dead code; capture session still calls it.
 - Add a host C++ test that compiles the production probe and checks simulated 720p/1080p frame selection.
 

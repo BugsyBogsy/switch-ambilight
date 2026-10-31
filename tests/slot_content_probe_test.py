@@ -33,13 +33,21 @@ using u32=std::uint32_t;
 using u64=std::uint64_t;
 ''' + offset + "\n" + probe + r'''
 int main() {
-    std::vector<u8> slot(1920u * 1088u * 4u, 0);
+    // The framebuffer is block-linear, not a linear RGBA array.
+    // A 1080p picture uses 9 blocks of 128 rows; each block contains
+    // 120 GOB columns of 8192 bytes: 0x870000 (8,847,360 bytes).
+    constexpr u32 block_rows = (1080u + 127u) / 128u;
+    constexpr u32 gob_columns = (1920u * 4u) / 64u;
+    constexpr u32 block_bytes = 512u << 4;
+    std::vector<u8> slot(block_rows * gob_columns * block_bytes, 0);
     u32 count=0;
     assert(SlotContentIs720(slot.data(), &count, 1920, 4));
     assert(count > 100);
     // A visible pixel outside the 720p upper-left corner forces 1080p.
     const u64 off=BlOffset(1400,10,1920,4);
     assert(off+3 < slot.size());
+    // Confirm the latest sampled outside-corner offset is in the padded surface.
+    assert(BlOffset(1210,1040,1920,4)+3 < slot.size());
     slot[off]=255;
     assert(!SlotContentIs720(slot.data(), &count, 1920, 4));
     slot[off]=0;
