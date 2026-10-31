@@ -15,7 +15,8 @@ for token in ('ArmFileContains("nvenc")', 'ArmFileContains("nvgrc")',
 assert "TryAmbilightStream(" in source
 assert "sftambi::Sample(" in source
 assert "NetAmbilightSend(" in source
-assert "struct NvfSession" in source
+capture = (root / "tier4/applet-mitm/source/ambi_capture_session.inc").read_text()
+assert "struct VicCaptureSession {" in capture
 assert "NvfEncode(" not in source, "Unused encoder wrapper restored"
 assert "NvfBitsLen(" not in source, "Unused H.264 length decoder restored"
 assert "NvfSubmit(" not in source and "NvfWaitDone(" not in source, "Obsolete encoder submit restored"

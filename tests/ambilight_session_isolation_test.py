@@ -7,7 +7,7 @@ assert "struct VicCaptureSession {" in capture
 assert "~VicCaptureSession()" in capture
 assert "bool Vic(" in capture
 assert "struct AmbilightSession final : VicCaptureSession {};" in s
-assert "struct NvfSession final : VicCaptureSession {};" in s
+assert "struct NvfSession final : VicCaptureSession {};" not in s
 assert "struct AmbilightSession final : NvfSession" not in s
 a=s[s.rfind("StreamEnd TryAmbilightStream("):s.find("/* ---- M99:",s.rfind("StreamEnd TryAmbilightStream("))]
 assert "AmbilightSession s;" in a and "NvfSession s;" not in a
@@ -16,3 +16,8 @@ print("OK: AmbilightSession independent from NvfSession; shared VIC capture reta
 
 assert "TryNvencStream(" not in s
 assert "NvfSubmit(" not in s and "NvfWaitDone(" not in s
+
+assert "NvfSession s;" not in s
+assert '"/dev/nvhost-msenc"' not in capture
+assert "x.esyncpt" not in capture and "x.efd" not in capture
+assert "NvfCtx" not in capture and "VicFrameContext x" in capture

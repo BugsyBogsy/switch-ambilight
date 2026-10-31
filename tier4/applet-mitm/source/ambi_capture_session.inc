@@ -6,8 +6,7 @@
         struct VicCaptureSession {
             u32 vfd = 0, cmd_handle = 0, vsyncpt = 0, cfg_addr = 0;
             u32 sh = 0, slot_vic = 0, arena_vic = 0;
-            NvfCtx x = {};
-            bool efd_open = false, keep_open = false;
+            VicFrameContext x = {};
             SrcDesc src{ 1920, 1080, 1920, vic::BLK_KIND_GENERIC_16Bx2, 4, vic::PIXFMT_A8R8G8B8, vic::CACHE_WIDTH_64Bx4, 1920, 1080 };
             bool corner = false;       /* handheld: read and convert the 1280x720 corner 1:1 */
             u32 seen = 0;              /* g_queue_count at the last capture */
@@ -21,7 +20,6 @@
             u32 arena_size = NvfArenaSize;
             const NvfLayout *lay = nullptr;    /* M90: nullptr = 720p */
             const NvfLayout &Lay() const { return lay != nullptr ? *lay : Layout720(); }
-            bool vic_only = false;             /* v0.7.7: webcam-any - no NVENC channel */
             u32 nvfd = 0;                      /* v0.7.10: the nvmap fd our handles live on, to free them */
             /* M87: the game's swapchain geometry. The defaults are MK8's, which
              * every run before M87 hard-coded: three 1920x1080 A8B8G8R8 slots
@@ -370,17 +368,10 @@
             }
 
             ~VicCaptureSession() {
-                if (efd_open && !keep_open) {
-                    if (x.enc != 0) { UnmapCmdBuffer(x.efd, x.ah); }
-                    NvClose(x.efd);
-                }
                 if (arena_vic != 0) { UnmapCmdBuffer(vfd, x.ah); }
                 if (slot_vic != 0) { UnmapCmdBuffer(vfd, sh); }
-                /* v0.7.10: unmapped everywhere - free the handles, so the
-                 * capture region can go back to the system. Not when a job
-                 * may still be in the channel (keep_open): the arena stays
-                 * referenced and CaptureRelease keeps the memory. */
-                if (!keep_open && nvfd != 0) {
+                /* VIC has no in-flight NVENC jobs; all handles can be freed. */
+                if (nvfd != 0) {
                     if (x.ah != 0 && NvmapFree(nvfd, x.ah)) { --g_capture_handles; }
                     if (sh != 0 && NvmapFree(nvfd, sh)) { --g_capture_handles; }
                 }
@@ -412,7 +403,6 @@
                 x.a = g_ind_buf + arena_base;
                 x.lay = lay;
                 std::memset(x.a, 0, arena_size);
-                if (Lay().idr_setup != nullptr) { std::memcpy(x.a + Lay().off_setup, Lay().idr_setup, 0x1000); }
                 armDCacheFlush(x.a, arena_size);
                 u32 aid = 0;
                 if (R_FAILED(NvmapOwn(nvmap_fd, x.a, arena_size, 0, std::addressof(x.ah), std::addressof(aid), true))) {
@@ -421,32 +411,10 @@
                 ++g_capture_handles;
                 MapCmdBuffer(vfd, x.ah, std::addressof(arena_vic), "nvf-arena(vic)", 0);
                 if (arena_vic == 0) { LogLine("   %s: arena pin (VIC) returned 0 - refusing", who); return false; }
-                if (vic_only) {
-                    LogLine("   %s: arena %u KB at +%zu KB; VIC sees it at %#x; picture %#x/%#x (no encoder)",
-                            who, arena_size / 1024, arena_base / 1024, arena_vic, arena_vic + Lay().off_cur, arena_vic + Lay().off_cur_uv);
-                    seen = g_queue_count.load(std::memory_order_relaxed);
-                    return true;
-                }
-
-                u32 nverr = 0;
-                if (R_FAILED(NvOpen("/dev/nvhost-msenc", std::addressof(x.efd), std::addressof(nverr))) || nverr != 0) {
-                    LogLine("   %s: /dev/nvhost-msenc open FAILED nverr=%u", who, nverr); return false;
-                }
-                efd_open = true;
-                {
-                    struct { u32 module_id; u32 syncpt; } gs = { 0, 0 };
-                    nverr = 0;
-                    NvIoctl(x.efd, NvHostIocChannelGetSyncpoint, std::addressof(gs), sizeof(gs), std::addressof(nverr));
-                    x.esyncpt = gs.syncpt;
-                }
-                if (x.esyncpt == 0 || x.esyncpt == 12) { LogLine("   %s: msenc syncpt=%u - REFUSING", who, x.esyncpt); return false; }
-                { struct { u32 fd; } sn = { nvmap_fd }; nverr = 0;
-                  NvIoctl(x.efd, NvHostIocChannelSetNvmapFd, std::addressof(sn), sizeof(sn), std::addressof(nverr)); }
-                MapCmdBuffer(x.efd, x.ah, std::addressof(x.enc), "nvf-arena(enc)", 0);
-                if (x.enc == 0) { LogLine("   %s: arena pin (NVENC) returned 0 - refusing", who); return false; }
-                LogLine("   %s: arena %u KB at +%zu KB; VIC sees it at %#x, NVENC at %#x (syncpt %u); picture %#x/%#x, bits %#x",
-                        who, arena_size / 1024, arena_base / 1024, arena_vic, x.enc, x.esyncpt,
-                        x.enc + Lay().off_cur, x.enc + Lay().off_cur_uv, x.enc + Lay().off_bits);
+                /* VIC-only session: no encoder device, msenc IOVA or channel. */
+                LogLine("   %s: VIC arena %u KB at +%zu KB, mapped %#x; NV12 picture %#x/%#x",
+                        who, arena_size / 1024, arena_base / 1024, arena_vic,
+                        arena_vic + Lay().off_cur, arena_vic + Lay().off_cur_uv);
                 seen = g_queue_count.load(std::memory_order_relaxed);
                 return true;
             }
@@ -940,54 +908,5 @@
                 return ok;
             }
 
-            void SetSetupByte(u32 off, u8 v) {
-                x.a[NvfOffSetup + off] = v;
-                armDCacheFlush(x.a + NvfOffSetup + (off & ~0x3Fu), 0x40);
-            }
-
-            /* true: the job finished after all - the engine is not wedged */
-            bool Stall(const char *who, const char *what) {
-                LogLine("   %s: %s: no status from our job in 1 s.", who, what);
-                u32 now = 0;
-                /* v0.7.1: late is not wedged. In Minecraft our job waited behind
-                 * someone else's (grc's recorder, most likely: the syncpoint went
-                 * 64 past our fence with nothing more of ours submitted) and was
-                 * done within a second - but this used to end streaming for the
-                 * whole boot. Give it 3 s more; if the fence is reached the job
-                 * is over, the channel can close normally, and the next session
-                 * starts afresh. */
-                if (const u32 cfd = CtrlFd(); cfd != 0) {
-                    const u64 w0 = armTicksToNs(armGetSystemTick());
-                    for (;;) {
-                        struct { u32 id; u32 value; } r = { x.esyncpt, 0 };
-                        u32 e = 0;
-                        NvIoctl(cfd, NvHostIocCtrlSyncptRead, std::addressof(r), sizeof(r), std::addressof(e));
-                        now = r.value;
-                        if (e == 0 && static_cast<s32>(now - g_nvf_last_fence) >= 0) {
-                            LogLine("   %s: the job finished %llu ms later (syncpt %u now %u, fence %u) - NVENC was busy, not wedged; the stream restarts",
-                                    who, static_cast<unsigned long long>((armTicksToNs(armGetSystemTick()) - w0) / 1000000), x.esyncpt, now, g_nvf_last_fence);
-                            return true;
-                        }
-                        if (armTicksToNs(armGetSystemTick()) - w0 > UINT64_C(3000000000)) { break; }
-                        os::SleepThread(TimeSpan::FromMilliSeconds(10));
-                    }
-                }
-                g_engine_wedged = true;
-                keep_open = true;
-                LogLine("   %s: still not done after 3 s more. Leaving the NVENC channel OPEN (M74).", who);
-                LogLine("   %s: syncpt %u now %u, fence %u %s; status picture index %#x %s", who, x.esyncpt, now,
-                        g_nvf_last_fence, g_nvf_last_fence_done ? "REACHED" : "not reached",
-                        g_nvf_last_pic, g_nvf_last_ours ? "(ours)" : "(not ours - the engine never wrote its status)");
-                LogLine("   No further engine work this boot.");
-                return false;
-            }
-
-            /* the clock, re-ensured: before the first submit, and in a long run
-             * whenever a periodic read finds it below 400 MHz */
-            bool EnsureClock(const char *who, u32 *hz) {
-                const u32 ensured = ClockEnsure(PcvModule_NVENC, who);
-                *hz = 0;
-                return ensured != 0 && ClockRateOf(PcvModule_NVENC, hz) && *hz != 0;
-            }
         };
 

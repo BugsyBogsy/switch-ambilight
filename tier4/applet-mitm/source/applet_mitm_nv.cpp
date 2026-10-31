@@ -3250,7 +3250,7 @@ namespace ams::mitm::applet {
          * swapchain (FindSwapchainBySize fell back to "the smallest region
          * that holds it", which in a homebrew app is as likely its texture
          * memory - Moonlight streamed its box art). Which candidate is which
-         * slot is worked out while streaming (NvfSession::Calibrate).
+         * slot is worked out while streaming (VicCaptureSession::Calibrate).
          *
          * One nvmap object per slot (GameSurface::separate - Smash Ultimate,
          * Moonlight): every device-mapped region that is a whole number of
@@ -3299,7 +3299,7 @@ namespace ams::mitm::applet {
         /* the region the swapchain is in: exactly the set's size (MK8, Smash's
          * first slot), or the smallest that holds it. When that is not the
          * whole story (one object per slot, homebrew in larger blocks) the
-         * stream's NvfSession::PrepareSlots finds the slot buffers and matches
+         * stream's VicCaptureSession::PrepareSlots finds the slot buffers and matches
          * them while streaming (v0.7.3, from WillMidia's PR #4 - it replaces
          * v0.7.1's calibration before the stream, which held the picture back
          * 2-6 s and never started on a still screen). */
@@ -5161,12 +5161,10 @@ namespace ams::mitm::applet {
         };
         const NvfLayout &Layout720();     /* defined past the P-frame constants */
 
-        struct NvfCtx {
-            u8  *a;             /* arena, CPU view (cached) */
-            u32 ah;             /* its nvmap handle */
-            u32 efd, esyncpt;   /* msenc channel */
-            u32 enc;            /* arena IOVA in the msenc channel */
-            const NvfLayout *lay = nullptr;   /* M90: nullptr = Layout720() */
+        struct VicFrameContext {
+            u8 *a = nullptr;      /* VIC destination arena, CPU view */
+            u32 ah = 0;           /* nvmap handle for the VIC arena */
+            const NvfLayout *lay = nullptr;
         };
 
         /* Where one job's setup and references live in the arena. The default
@@ -5375,7 +5373,7 @@ namespace ams::mitm::applet {
          * reverse: the slot copy pinned for the VIC, the arena pinned for the
          * VIC and for a new msenc channel. A channel whose job stalled is left
          * OPEN (M74: tearing down a stuck channel took the compositor with it). */
-        /* the last per-slot buffer match (NvfSession::Calibrate): the next
+        /* the last per-slot buffer match (VicCaptureSession::Calibrate): the next
          * session's first guess, so a restart (a size change, the viewer
          * reopened) starts on the right buffers */
         /* v0.7.16: + whose buffer set it was (pid, generation) and whether it was matched, not a give-up */
@@ -5463,7 +5461,6 @@ namespace ams::mitm::applet {
 
         /* WLED capture does not derive from the legacy video-stream session. */
         struct AmbilightSession final : VicCaptureSession {};
-        struct NvfSession final : VicCaptureSession {}; /* legacy H.264 / UVC */
 
         /* M84: a read fails for one expected reason - the game was closed */
         /* v0.7.16: a game's slot could not be read - it is quitting. Give the
@@ -5610,7 +5607,6 @@ namespace ams::mitm::applet {
               if (!s.Capture(dbg, slot_base, &rn, &sig)) { return StreamEnd::GameGone; }
               s.Decide("ambi"); }
             s.lay = &LayoutRaw(W, H);
-            s.vic_only = true;
             const NvfLayout &L = s.Lay();
             s.arena_size = L.arena_size;
             if (!s.Open(vfd, nvmap_fd, cmd_handle, vsyncpt, cfg_addr, "ambi")) {
@@ -5692,12 +5688,12 @@ namespace ams::mitm::applet {
         bool ShotFromSession(const VicCaptureSession &s) {
             /* v0.7.17: the PNG writer reads 4 bytes a pixel - not a 16-bit picture */
             if (vic::Is16Bit(s.src.pixfmt)) { LogLine("shot: a 16-bit picture - no screenshot from the stream"); return false; }
-            const u32 shown = s.size_check_ok ? (s.src.w << 16 | s.src.h) : NvfSession::PresentRect(s.src, s.cap_crop);   /* v0.7.13: what the game shows */
+            const u32 shown = s.size_check_ok ? (s.src.w << 16 | s.src.h) : VicCaptureSession::PresentRect(s.src, s.cap_crop);   /* v0.7.13: what the game shows */
             u32 w = s.corner ? NvfW : shown >> 16, h = s.corner ? NvfH : shown & 0xFFFF;
             if (s.size_check_ok) {          /* v0.7.15: dynamic resolution - only the presented part */
                 SrcDesc r = s.src;
                 r.rect_w = w; r.rect_h = h;
-                if (const u32 dyn = NvfSession::DynamicRect(r, s.cap_crop); dyn != 0) { w = dyn >> 16; h = dyn & 0xFFFF; }
+                if (const u32 dyn = VicCaptureSession::DynamicRect(r, s.cap_crop); dyn != 0) { w = dyn >> 16; h = dyn & 0xFFFF; }
             }
             const size_t n = s.CornerFast() ? static_cast<size_t>(CornerBlockRows) * FbBlockRow : s.buf_bytes;
             return WriteShot(g_shot_out, g_ind_buf, n, w, h, s.src.stride_px * 4, s.src.blk_h_log2, s.src.pixfmt == vic::PIXFMT_A8B8G8R8, s.present_flip);
@@ -5732,7 +5728,7 @@ namespace ams::mitm::applet {
             if (!found) {
                 ++g_shot_fail; LogLine("shot: the swapchain was not found in the game's memory");
             } else {
-                NvfSession s;
+                VicCaptureSession s;
                 if (s.SetGeometry(geo, "shot")) {
                     s.PrepareSlots(dbg, slot_base, "shot");
                     s.seen = g_queue_count.load(std::memory_order_acquire) - 1;   /* the latest present counts as new */
@@ -5791,7 +5787,7 @@ namespace ams::mitm::applet {
                                   u32 cmd_handle, u32 vsyncpt, u32 cfg_addr, const GameSurface *geo) {
             VicStage("uvcraw:1");
             if (g_stream_stage[0] == nullptr || g_stream_stage[1] == nullptr) { LogLine("   uvcraw: no stage buffers"); return StreamEnd::Failed; }
-            NvfSession s;
+            VicCaptureSession s;
             if (geo != nullptr && !s.SetGeometry(*geo, "uvcraw")) { VicStage("uvcraw:geometry"); return StreamEnd::Failed; }
             if (geo != nullptr) { s.PrepareSlots(dbg, slot_base, "uvcraw"); }
             {
@@ -5803,7 +5799,6 @@ namespace ams::mitm::applet {
             UvcFrameSize(std::addressof(w), std::addressof(h));
             g_uvc_new_consumer.store(false, std::memory_order_relaxed);
             s.lay = std::addressof(LayoutRaw(w, h));
-            s.vic_only = true;
             const NvfLayout &L = s.Lay();
             s.arena_size = L.arena_size;
             const size_t frame_bytes = L.luma + L.chroma;     /* the planes are back to back */

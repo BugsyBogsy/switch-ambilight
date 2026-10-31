@@ -66,3 +66,7 @@ Removed `TryNvencStream`, its game/HOME/probe entrypoints, and the orphaned NVEN
 ## Stage 4c: physical separation of VIC capture
 
 Moved the former capture implementation to `ambi_capture_session.inc`, included inside the original anonymous namespace. `AmbilightSession` uses the VIC owner independently of the old `NvfSession` adapter. The implementation is byte-for-byte identical; the refactor merely establishes a file boundary to make encoder-specific removal safer. Existing H.264-era fields and methods are still in the shared class and will be reviewed after ARM64 build results.
+
+## Stage 4d: VIC capture no longer owns NVENC
+
+The capture component now always uses VIC; its `Open` path never opens `/dev/nvhost-msenc`, maps an encoder channel, waits for H.264 jobs, or sets up a codec picture. Removed encoder stall, clock and setup methods and the `NvfSession` compatibility adapter. Raw UVC and screenshots still use the common VIC capture owner. H.264-related constants/diagnostic scaffolding in the surrounding source remain to be cleaned after successful ARM64 tests.
