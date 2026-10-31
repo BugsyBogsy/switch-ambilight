@@ -62,3 +62,7 @@ The common VIC owner still has H.264-era fields and methods; `TryNvencStream` is
 ## Stage 4b: H.264 streaming removed
 
 Removed `TryNvencStream`, its game/HOME/probe entrypoints, and the orphaned NVENC submit, wait and poll helpers. The working VIC -> WLED loop was kept intact. Other encoder-era layouts, debug scanner and raw UVC remain pending cleanup. This requires a successful ARM64 build and hardware test before release.
+
+## Stage 4c: physical separation of VIC capture
+
+Moved the former capture implementation to `ambi_capture_session.inc`, included inside the original anonymous namespace. `AmbilightSession` uses the VIC owner independently of the old `NvfSession` adapter. The implementation is byte-for-byte identical; the refactor merely establishes a file boundary to make encoder-specific removal safer. Existing H.264-era fields and methods are still in the shared class and will be reviewed after ARM64 build results.

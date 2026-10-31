@@ -1,5 +1,8 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Extract low-level swapchain/VIC capture owner to private `ambi_capture_session.inc` without modifying its behaviour.
+- Update host tests to expect the encoder submit/wait helpers to be absent.
+
 - Remove the H.264 streaming implementation and three dispatch paths; use Ambilight capture for WLED.
 - Drop orphaned encoder submit/wait/poll functions; other H.264 layouts and debug probes still require audit.
 

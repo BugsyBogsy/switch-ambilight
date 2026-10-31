@@ -18,7 +18,7 @@ assert "NetAmbilightSend(" in source
 assert "struct NvfSession" in source
 assert "NvfEncode(" not in source, "Unused encoder wrapper restored"
 assert "NvfBitsLen(" not in source, "Unused H.264 length decoder restored"
-assert "NvfSubmit(" in source and "NvfWaitDone(" in source, "Shared encoder helper moved unexpectedly"
+assert "NvfSubmit(" not in source and "NvfWaitDone(" not in source, "Obsolete encoder submit restored"
 # A previous source-deletion script matched NvfJob{} (default argument) as
 # the function opening brace, leaving the stray ')' and function body behind.
 # Guard against this class of syntactically invalid orphaned function tail.
