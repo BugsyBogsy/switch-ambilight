@@ -1,5 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Update legacy audio regression test to require complete source removal instead of disabled audio stubs.
+
 - Remove USB UVC webcam device implementation and uncompressed NV12 webcam stream.
 - Disable USB gadget boot arming, independent of legacy `usb` token; the WLED network stack remains active.
 - Retain old USB debug/viewer helpers temporarily because some non-Ambilight probes still reference them.

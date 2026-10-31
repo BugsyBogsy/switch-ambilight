@@ -86,3 +86,7 @@ Removed the historical H.264 GRC memory scanner, the `grcscan` flag and their en
 ## Stage 5b: UVC removed; USB gadget disabled
 
 UVC source/header and the `TryUvcRawStream` USB webcam capture loop are removed. Live game and HOME menu sessions use Ambilight directly. USB gadget startup is disabled even if old `usb` token is present. This does not remove old `Usb*` helpers used by remaining historical raw-frame diagnostics; they remain to be removed after their last callers and the related test/probe branches are isolated. The WLED network stack is unchanged.
+
+### Stage 5 tests
+
+The earlier audio regression check required two `store(false)` assignments, which no longer exist after deleting the audio module. It now verifies that the module, its header and boot-path references are absent.
