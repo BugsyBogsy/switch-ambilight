@@ -26,7 +26,6 @@
 #include "applet_mitm_clk.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_shot.hpp"
-#include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_uibinder.hpp"
 #include "applet_mitm_uisource.hpp"
@@ -751,11 +750,6 @@ namespace ams {
                 mitm::applet::LogLine("   usb: not armed (add \"usb\" to the arm file)");
                 return;
             }
-            /* v0.4: webcam mode describes a UVC camera instead */
-            if (mitm::applet::g_uvc_mode) {
-                static_cast<void>(mitm::applet::UvcSetupDevice());
-                return;
-            }
             mitm::applet::LogLine("---- USB device enumeration (usb:ds) ----");
 
             /* ::Result - libnx's u32 - NOT ams::Result, which is a class and
@@ -1105,9 +1099,7 @@ namespace ams {
         mitm::applet::g_vic_execute = ArmFileContains("exec");
         mitm::applet::g_dbg_armed   = ArmFileContains("dbg");
         mitm::applet::g_dump_armed  = ArmFileContains("dump");
-        g_usb_armed                 = ArmFileContains("usb");
-        mitm::applet::g_uvc_mode    = ArmFileContains("uvc");
-        mitm::applet::g_uvc_raw     = mitm::applet::g_uvc_mode && ArmFileContains("uvcraw");   /* v0.7.7: webcam-any */
+        g_usb_armed                 = false; /* Ambilight never claims USB device mode */
         mitm::applet::g_net_armed   = ArmFileContains("net");
         mitm::applet::g_bench_armed   = ArmFileContains("bench");
         mitm::applet::g_nvenc_armed   = false; /* legacy NVENC probes removed */
@@ -1434,7 +1426,7 @@ namespace ams::mitm::applet {
      * called on the VIC worker thread, the one thread that sends over USB, and
      * never during a stream session. Webcam mode keeps its camera. */
     void UsbFollowStreamSwitch() {
-        if (!::ams::g_usb_armed || g_uvc_mode) { return; }
+        if (!::ams::g_usb_armed) { return; }
         const bool on = g_stream_enabled.load(std::memory_order_relaxed);
         if (!on && !g_usb_released && ::ams::g_usb_ep_in != nullptr) {
             static_cast<void>(usbDsEndpoint_Cancel(::ams::g_usb_ep_in));
@@ -1475,15 +1467,6 @@ namespace ams::mitm::applet {
             return true;
         }
         if (!UsbReady()) { return false; }
-        /* v0.4: a webcam's "viewer" is a host that committed a stream */
-        if (g_uvc_mode) {
-            for (u32 t = 0; !g_uvc_streaming.load(std::memory_order_relaxed); t += 50) {
-                if (t >= timeout_ms) { return false; }
-                os::SleepThread(TimeSpan::FromMilliSeconds(50));
-            }
-            /* committed - but after a stall, only once the host reads again */
-            return !UvcHostStalled() || UvcHostReading(timeout_ms);
-        }
         alignas(0x1000) static u8 hello[0x1000];
         const u32 h[8] = { 0x52544653u, 2u, 0, 0, 0, 0, 0, 0 };   /* "SFTR", v2, all else 0: length 0 */
         std::memcpy(hello, h, sizeof(h));
@@ -1508,7 +1491,6 @@ namespace ams::mitm::applet {
      * dead connection and reconnected each time (logs/v0717-test1). About once
      * a second: the USB probe's empty header, or the network status. */
     void ViewerKeepAlive() {
-        if (g_uvc_mode) { return; }
         static u64 s_ns = 0;
         const u64 now = armTicksToNs(armGetSystemTick());
         if (now - s_ns < UINT64_C(1000000000)) { return; }
@@ -1517,7 +1499,7 @@ namespace ams::mitm::applet {
     }
 
     bool UsbReady() {
-        if (::ams::g_usb_ep_in == nullptr && !g_uvc_mode) { return false; }
+        if (::ams::g_usb_ep_in == nullptr) { return false; }
         UsbState st = UsbState_Detached;
         if (R_FAILED(usbDsGetState(std::addressof(st)))) { return false; }
         return st == UsbState_Configured;
@@ -1589,7 +1571,7 @@ namespace ams::mitm::applet {
     namespace { bool g_bye_posted = false; u32 g_bye_urb = 0; }
 
     bool UsbViewerSaidBye() {
-        if (g_tx_net.load(std::memory_order_relaxed) || g_uvc_mode || ::ams::g_usb_ep_out == nullptr) { return false; }
+        if (g_tx_net.load(std::memory_order_relaxed) || ::ams::g_usb_ep_out == nullptr) { return false; }
         UsbDsEndpoint *ep = ::ams::g_usb_ep_out;
         if (!g_bye_posted) {
             eventClear(std::addressof(ep->CompletionEvent));

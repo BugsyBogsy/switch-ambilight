@@ -48,7 +48,6 @@
 #include "applet_mitm_shot.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_donor.hpp"
-#include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_ambi_core.hpp"
 #include "ambi_runtime.hpp"
@@ -1233,8 +1232,6 @@ namespace ams::mitm::applet {
         bool ShotStandalone();
         StreamEnd TryAmbilightStream(::ams::svc::Handle dbg, u64 slot_base, u32 vfd, u32 nvmap_fd,
                                      u32 cmd_handle, u32 vsyncpt, u32 cfg_addr, const GameSurface *geo);
-        StreamEnd TryUvcRawStream(::ams::svc::Handle dbg, u64 slot_base, u32 vfd, u32 nvmap_fd,
-                                  u32 cmd_handle, u32 vsyncpt, u32 cfg_addr, const GameSurface *geo);
 
         bool WriteSdVerified(const char *path, const u8 *src, size_t len, u8 *verify, u32 *out_fnv);
         bool WriteEngineOutputToSd(const char *path, const u8 *uncached_src, size_t len, u32 *out_fnv);
@@ -3374,8 +3371,7 @@ namespace ams::mitm::applet {
             }
             if (ui_started) {
                 g_reconfig_request.store(false, std::memory_order_relaxed);
-                end = g_uvc_raw ? TryUvcRawStream(dbg, base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, std::addressof(ug))
-                                : TryAmbilightStream(dbg, base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, std::addressof(ug));
+                end = TryAmbilightStream(dbg, base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, std::addressof(ug));
             }
             UiSourceStop();
             g_ui_session_active.store(false, std::memory_order_relaxed);
@@ -3752,8 +3748,7 @@ namespace ams::mitm::applet {
                 g_reconfig_request.store(false, std::memory_order_relaxed);   /* this session starts with the current settings */
                 const GameSurface *gp = (geo.num_slots != 0 && geo.buf_size != 0) ? std::addressof(geo) : nullptr;
                 const AttachRecord attached = NoteAttach(pid.value, applet_target);   /* v0.7.19: auto-skip */
-                const StreamEnd end = g_uvc_raw ? TryUvcRawStream(dbg, slot_base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, gp)
-                                                : TryAmbilightStream(dbg, slot_base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, gp);
+                const StreamEnd end = TryAmbilightStream(dbg, slot_base, vfd, nvmap_fd, cmd_handle, syncpt, cfg_addr, gp);
                 const bool target_exited = !DbgIsDmnt(dbg) && DebugPumpTargetGone();
                 if (!DbgIsDmnt(dbg)) { DebugPumpStop(); }
                 DbgDetach(dbg);
@@ -5738,137 +5733,6 @@ namespace ams::mitm::applet {
          * No encoder, so nothing to pipeline: USB 2.0 is the limit (720p ~25
          * fps, 432p 60), and the loop simply waits for the previous frame to
          * leave before it reads the newest present. */
-        StreamEnd TryUvcRawStream(::ams::svc::Handle dbg, u64 slot_base, u32 vfd, u32 nvmap_fd,
-                                  u32 cmd_handle, u32 vsyncpt, u32 cfg_addr, const GameSurface *geo) {
-            VicStage("uvcraw:1");
-            if (g_stream_stage[0] == nullptr || g_stream_stage[1] == nullptr) { LogLine("   uvcraw: no stage buffers"); return StreamEnd::Failed; }
-            VicCaptureSession s;
-            if (geo != nullptr && !s.SetGeometry(*geo, "uvcraw")) { VicStage("uvcraw:geometry"); return StreamEnd::Failed; }
-            if (geo != nullptr) { s.PrepareSlots(dbg, slot_base, "uvcraw"); }
-            {
-                u64 rn = 0; u32 sg = 0;
-                if (!s.Capture(dbg, slot_base, std::addressof(rn), std::addressof(sg))) { LogLine("   uvcraw: %s", SlotReadFailure()); return StreamEnd::GameGone; }
-                s.Decide("uvcraw");
-            }
-            u32 w = 0, h = 0;
-            UvcFrameSize(std::addressof(w), std::addressof(h));
-            g_uvc_new_consumer.store(false, std::memory_order_relaxed);
-            s.lay = std::addressof(LayoutRaw(w, h));
-            const NvfLayout &L = s.Lay();
-            s.arena_size = L.arena_size;
-            const size_t frame_bytes = L.luma + L.chroma;     /* the planes are back to back */
-            LogLine("   ---- WEBCAM (any app): NV12 %ux%u, %zu B a frame, no encoder ----", w, h, frame_bytes);
-            if (!s.Open(vfd, nvmap_fd, cmd_handle, vsyncpt, cfg_addr, "uvcraw")) { VicStage("uvcraw:open_FAILED"); return g_engine_wedged ? StreamEnd::EngineStall : StreamEnd::Failed; }
-            g_live_w.store(w, std::memory_order_relaxed);
-            g_live_h.store(h, std::memory_order_relaxed);
-            g_live_state.store(LiveState_Streaming, std::memory_order_relaxed);
-            g_streaming_now.store(true, std::memory_order_relaxed);
-            ON_SCOPE_EXIT { g_streaming_now.store(false, std::memory_order_relaxed); };
-            SetViewerReason(ViewerReason_None);
-            g_vic_quiet = true;
-            ON_SCOPE_EXIT { g_vic_quiet = false; };
-
-            const char *why = "all frames sent";
-            StreamEnd end = StreamEnd::Done;
-            u32 parity = 0, sent = 0, frame_no = 0, dropped = 0;
-            bool pending = false;
-            SizeCheck size_check(s.corner);
-            u64 s_read = 0, s_vic = 0, s_pack = 0, s_wait = 0, w_n = 0;
-            const u64 loop_t0 = armTicksToNs(armGetSystemTick());
-            u64 o_t0 = loop_t0, w_t0 = loop_t0;
-            u32 o_sent0 = 0, w_sent0 = 0, o_q0 = g_queue_count.load(std::memory_order_relaxed);
-            for (u32 i = 0; ; ++i) {
-                const u64 t0 = armTicksToNs(armGetSystemTick());
-                if (!g_stream_enabled.load(std::memory_order_relaxed)) { why = "turned off from the overlay"; end = StreamEnd::Disabled; break; }
-                if (g_reconfig_request.exchange(false, std::memory_order_relaxed)) { why = "new settings from the manager app"; end = StreamEnd::Reconfigure; break; }
-                if (g_app_excluded.load(std::memory_order_relaxed)) { why = "this app was excluded"; end = StreamEnd::Disabled; break; }
-                if (g_ui_session_active.load(std::memory_order_relaxed) && g_game_presented_in_ui.load(std::memory_order_relaxed)) { why = "a game is on screen"; end = StreamEnd::GameGone; break; }   /* v0.7.14 */
-                if (g_detach_on_home && !g_ui_session_active.load(std::memory_order_relaxed)) {
-                    const u64 qt = g_queue_tick.load(std::memory_order_relaxed);
-                    if (qt != 0) {
-                        const u64 age_ms = armTicksToNs(armGetSystemTick() - qt) / UINT64_C(1000000);
-                        const char *home_why = nullptr;
-                        /* v0.7.17: 0.5 s with a web applet's menu over the game */
-                        const bool web_fast = age_ms >= 500 && WebMenuUp();
-                        if (web_fast || HomeDetachShouldFire(age_ms, g_home_detach_ms, g_home_fallback_ms, std::addressof(home_why))) {
-                            why = "HOME / game stopped presenting";
-                            if (web_fast && home_why == nullptr) { home_why = "web menu over game"; }
-                            LogLine("home: detach (%s) after present stall %llu ms (probe %u, fallback %u)",
-                                    home_why != nullptr ? home_why : "?",
-                                    static_cast<unsigned long long>(age_ms), g_home_detach_ms, g_home_fallback_ms);
-                            if (HomeDetachKeepsEngines(home_why, web_fast)) {
-                                LogLine("home: the HOME menu is streamed - the engines stay for its session");
-                            } else {
-                                /* Free donor now on confirm (and on 5 s fallback) so
-                                 * Album / SwitchU is not racing a mapped 42 MB. */
-                                PrepareForHomeMenu();
-                            }
-                            end = StreamEnd::GameGone;
-                            break;
-                        }
-                    }
-                }
-                if (geo != nullptr && g_session_surface->generation != geo->generation) { why = "the game made new frame buffers"; end = StreamEnd::Reconfigure; break; }
-                if (g_uvc_new_consumer.exchange(false, std::memory_order_relaxed)) {
-                    u32 nw = 0, nh = 0;
-                    UvcFrameSize(std::addressof(nw), std::addressof(nh));
-                    if (nw != w) { why = "the camera app asked for another size"; end = StreamEnd::Reconfigure; break; }
-                }
-                if (UvcHostStalled()) { why = "the camera app stopped reading"; end = StreamEnd::ViewerGone; break; }
-                if (!g_uvc_streaming.load(std::memory_order_relaxed)) { why = "the camera app closed (host detached)"; end = StreamEnd::ViewerGone; break; }
-                if (t0 - o_t0 >= UINT64_C(1000000000)) {
-                    const u32 qn = g_queue_count.load(std::memory_order_relaxed);
-                    g_live_fps_x10.store(static_cast<u32>(static_cast<u64>(sent - o_sent0) * UINT64_C(10000000000) / (t0 - o_t0)), std::memory_order_relaxed);
-                    g_live_game_fps_x10.store(static_cast<u32>(static_cast<u64>(qn - o_q0) * UINT64_C(10000000000) / (t0 - o_t0)), std::memory_order_relaxed);
-                    o_t0 = t0; o_sent0 = sent; o_q0 = qn;
-                }
-                u64 rn = 0; u32 sg = 0;
-                if (!s.Capture(dbg, slot_base, std::addressof(rn), std::addressof(sg), std::addressof(dropped))) { why = SlotReadFailure(); GameLeft(); end = StreamEnd::GameGone; break; }
-                const u64 t1 = armTicksToNs(armGetSystemTick());
-                if (!s.Vic("uvcraw:vic", L.off_cur)) { why = "VIC did not complete"; end = StreamEnd::Failed; break; }
-                if (TakeShotRequest()) { static_cast<void>(ShotFromSession(s)); }
-                const u64 t2 = armTicksToNs(armGetSystemTick());
-                /* the engine wrote it: drop any stale cache lines before reading */
-                armDCacheFlush(s.x.a + L.off_cur, frame_bytes);
-                if (pending) { UvcWaitSent(); ++sent; pending = false; }
-                const u64 t3 = armTicksToNs(armGetSystemTick());
-                const size_t total = UvcRawPack(g_stream_stage[parity], s.x.a + L.off_cur, frame_bytes, frame_no++);
-                UvcQueueFrame(g_stream_stage[parity], total);
-                pending = true;
-                parity ^= 1;
-                const u64 t4 = armTicksToNs(armGetSystemTick());
-                s_read += t1 - t0; s_vic += t2 - t1; s_wait += t3 - t2; s_pack += t4 - t3; ++w_n;
-
-                /* the 720p/1080p check (SizeCheck) */
-                if (s.size_check_ok) {
-                    const s32 sl = g_queue_slot.load(std::memory_order_relaxed);
-                    if (const char *r = size_check.Step(dbg, s.SlotAddr(slot_base, sl), sl, s.src.stride_px, s.src.blk_h_log2)) {
-                        why = r; end = StreamEnd::Reconfigure; break;
-                    }
-                }
-                if ((i + 1) % 1200 == 0) {
-                    const u64 wn = armTicksToNs(armGetSystemTick());
-                    const u64 n = w_n ? w_n : 1;
-                    const u64 fps = wn > w_t0 ? static_cast<u64>(sent - w_sent0) * UINT64_C(10000000000) / (wn - w_t0) : 0;
-                    LogLine("   uvcraw window: %llu.%llu fps sent; per frame avg us: read %llu  VIC %llu  waiting for USB %llu  pack %llu",
-                            static_cast<unsigned long long>(fps / 10), static_cast<unsigned long long>(fps % 10),
-                            static_cast<unsigned long long>(s_read / n / 1000), static_cast<unsigned long long>(s_vic / n / 1000),
-                            static_cast<unsigned long long>(s_wait / n / 1000), static_cast<unsigned long long>(s_pack / n / 1000));
-                    s_read = s_vic = s_wait = s_pack = 0; w_n = 0; w_t0 = wn; w_sent0 = sent;
-                    DebugPumpLogStats("uvcraw");
-                }
-                /* hand the core back (M60b) */
-                os::SleepThread(TimeSpan::FromMicroSeconds(500));
-            }
-            if (pending) { UvcWaitSent(); ++sent; }
-            const u64 ms = (armTicksToNs(armGetSystemTick()) - loop_t0) / 1000000;
-            LogLine("   uvcraw: stopped: %s", why);
-            LogLine("   uvcraw: %u frames sent in %llu ms (%llu.%llu fps), %u presents skipped", sent, static_cast<unsigned long long>(ms),
-                    static_cast<unsigned long long>(ms ? sent * 1000ull / ms : 0), static_cast<unsigned long long>(ms ? (sent * 10000ull / ms) % 10 : 0), dropped);
-            UvcLogStats("uvcraw");
-            return end;
-        }
-
         /* The H.264 streaming pipeline is removed; use VIC -> DDP. */
 
         /* ---- M83: P frames, an opt-in probe ("nvp") ---------------------------

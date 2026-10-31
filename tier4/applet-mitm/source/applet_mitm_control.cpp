@@ -1,4 +1,3 @@
-#include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_donor.hpp"
@@ -42,7 +41,7 @@ namespace ams::mitm::applet {
                 Result GetStatus(sf::Out<StreamStatus> out) {
                     StreamStatus st = {};
                     st.version      = 4;
-                    st.reserved3    = (g_uvc_mode ? 1u : 0u) | (g_net_armed ? 2u : 0u) | (NetClientPresent() ? 4u : 0u) | (g_uvc_raw ? 8u : 0u) | (g_ui_stream_armed ? 16u : 0u) | (OverlaysArmed() ? 32u : 0u);   /* v0.4 webcam, v0.7 network on / viewer on the network, v0.7.7 webcam-any, v0.7.14 HOME menu, overlays */
+                    st.reserved3    = (g_net_armed ? 2u : 0u) | (NetClientPresent() ? 4u : 0u) | (g_ui_stream_armed ? 16u : 0u) | (OverlaysArmed() ? 32u : 0u);   /* v0.4 webcam, v0.7 network on / viewer on the network, v0.7.7 webcam-any, v0.7.14 HOME menu, overlays */
                     st.reserved     = 0; /* v4 IPC field preserved; audio not supported */
                     st.state        = g_live_state.load(std::memory_order_relaxed);
                     st.enabled      = g_stream_enabled.load(std::memory_order_relaxed) ? 1 : 0;

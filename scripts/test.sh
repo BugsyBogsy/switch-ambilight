@@ -37,3 +37,5 @@ python3 "$ROOT/tests/streaming_cleanup_test.py"
 python3 "$ROOT/tests/slot_content_probe_test.py"
 
 python3 "$ROOT/tests/grc_audio_cleanup_test.py"
+
+python3 "$ROOT/tests/uvc_cleanup_test.py"

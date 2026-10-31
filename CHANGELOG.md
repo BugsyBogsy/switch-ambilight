@@ -1,5 +1,9 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove USB UVC webcam device implementation and uncompressed NV12 webcam stream.
+- Disable USB gadget boot arming, independent of legacy `usb` token; the WLED network stack remains active.
+- Retain old USB debug/viewer helpers temporarily because some non-Ambilight probes still reference them.
+
 - Remove obsolete GRC H.264 memory scanner and `grcscan` debug token, but retain boot GRC service handling.
 - Remove unused audio recorder and 96 KiB of audio-only capture tail.
 - Preserve stream status IPC layout with former audio field now zero.

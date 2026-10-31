@@ -82,3 +82,7 @@ The `SlotContentIs720` function was mistakenly removed during H.264 clean-up, wh
 ## Stage 5a: obsolete GRC scanner and audio
 
 Removed the historical H.264 GRC memory scanner, the `grcscan` flag and their entrypoint. This **does not remove the early GRC service setup**, which remains part of the old startup path until separately audited. Removed the unused grc:d PCM recorder and audio ring implementation. The capture tail now holds only the screenshot PNG buffer and the v4 status IPC audio field stays zero. USB/UVC and old viewer transports remain pending further separation.
+
+## Stage 5b: UVC removed; USB gadget disabled
+
+UVC source/header and the `TryUvcRawStream` USB webcam capture loop are removed. Live game and HOME menu sessions use Ambilight directly. USB gadget startup is disabled even if old `usb` token is present. This does not remove old `Usb*` helpers used by remaining historical raw-frame diagnostics; they remain to be removed after their last callers and the related test/probe branches are isolated. The WLED network stack is unchanged.
