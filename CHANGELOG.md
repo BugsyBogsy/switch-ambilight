@@ -1,5 +1,9 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove obsolete GRC H.264 memory scanner and `grcscan` debug token, but retain boot GRC service handling.
+- Remove unused audio recorder and 96 KiB of audio-only capture tail.
+- Preserve stream status IPC layout with former audio field now zero.
+
 - Fix 720p probe host fixture to allocate padded 0x870000 block-linear framebuffer rather than a smaller linear 1920x1088x4 buffer.
 
 - Restore VIC 720p corner probe `SlotContentIs720` wrongly removed as H.264 dead code; capture session still calls it.

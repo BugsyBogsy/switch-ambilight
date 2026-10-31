@@ -35,3 +35,5 @@ python3 "$ROOT/tests/ambilight_session_isolation_test.py"
 python3 "$ROOT/tests/streaming_cleanup_test.py"
 
 python3 "$ROOT/tests/slot_content_probe_test.py"
+
+python3 "$ROOT/tests/grc_audio_cleanup_test.py"

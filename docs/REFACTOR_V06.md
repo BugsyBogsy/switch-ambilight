@@ -78,3 +78,7 @@ Removed the old NVENC 1080p layout factory and unused 720p slot-content test plu
 ### VIC corner-probe regression fix
 
 The `SlotContentIs720` function was mistakenly removed during H.264 clean-up, while `VicCaptureSession::Decide` still calls it from `ambi_capture_session.inc`. This breaks ARM64 compile. Restored the exact known working probe and added a host test that compiles production `BlOffset` / `SlotContentIs720` and validates black-outside, lit-outside, and lit-inside 720p corner cases. Future clean-ups must scan every `.inc` and `.hpp` dependency before deleting a function.
+
+## Stage 5a: obsolete GRC scanner and audio
+
+Removed the historical H.264 GRC memory scanner, the `grcscan` flag and their entrypoint. This **does not remove the early GRC service setup**, which remains part of the old startup path until separately audited. Removed the unused grc:d PCM recorder and audio ring implementation. The capture tail now holds only the screenshot PNG buffer and the v4 status IPC audio field stays zero. USB/UVC and old viewer transports remain pending further separation.

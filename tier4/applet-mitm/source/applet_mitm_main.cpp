@@ -26,7 +26,6 @@
 #include "applet_mitm_clk.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_shot.hpp"
-#include "applet_mitm_audio.hpp"
 #include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_uibinder.hpp"
@@ -635,7 +634,6 @@ namespace ams {
             mitm::applet::g_shot_mask.store(mitm::applet::armfile::Number(g_arm_buf, g_arm_len, "shotmask", 0) & sft::shotbuttons::AllButtons);
             mitm::applet::g_shot_capture.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotcap"));
             mitm::applet::g_shot_album.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotalbum"));
-            mitm::applet::g_audio_enabled.store(false); /* WLED-only: no audio capture */
             mitm::applet::g_nvab_armed = mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nvab");
             /* on unless config sets detach_on_home=0 (nodethome) */
             mitm::applet::g_detach_on_home = !mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nodethome");
@@ -1118,7 +1116,6 @@ namespace ams {
         mitm::applet::g_nvjpg_attempts = ArmFileNumber("jat", 90);
         mitm::applet::g_sweep_armed   = ArmFileContains("sweep");
         mitm::applet::g_matrix_armed  = ArmFileContains("mtx");
-        mitm::applet::g_grcscan_armed = ArmFileContains("grcscan");
         mitm::applet::g_clk_armed     = ArmFileContains("clk");
         mitm::applet::g_jpgdec_armed  = ArmFileContains("jpgdec");
         mitm::applet::g_nvgrc_armed   = false; /* GRC replay removed */
@@ -1147,7 +1144,6 @@ namespace ams {
         mitm::applet::g_shot_capture.store(ArmFileContains("shotcap"));
         mitm::applet::g_shot_album.store(ArmFileContains("shotalbum"));
         mitm::applet::NoteAlbumPath();   /* v0.7.11: for the manager's gallery */
-        mitm::applet::g_audio_enabled.store(false); /* audio stays disabled */
         mitm::applet::LogLine("install type from GetEntryType(sdmc:/applet-mitm.armed) rc=0x%x", mitm::applet::g_arm_probe_rc);
         mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, Ambilight config (legacy fallback) ->" : "TEST install, sdmc:/applet-mitm.armed",
                               static_cast<int>(g_arm_len), g_arm_buf);
@@ -1170,14 +1166,14 @@ namespace ams {
         mitm::applet::g_stream_frames = ArmFileNumber("sframes", 600);
         mitm::applet::g_probe_delay_s = ArmFileNumber("wait", 120);
         mitm::applet::LogLine("ARMED FLAGS: vic=%d exec=%d dbg=%d dump=%d usb=%d bench=%d nvenc=%d "
-                              "jpg=%d sweep=%d mtx=%d stream=%d grc=%d grcscan=%d clk=%d jpgdec=%d nvgrc=%d csc=%d nvframe=%d(%u) nvstream=%d(%u, qp %u, gop %u) nvp=%d(%u) live=%d nv1080=%d(%u) wait=%u",
+                              "jpg=%d sweep=%d mtx=%d stream=%d grc=%d clk=%d jpgdec=%d nvgrc=%d csc=%d nvframe=%d(%u) nvstream=%d(%u, qp %u, gop %u) nvp=%d(%u) live=%d nv1080=%d(%u) wait=%u",
                               mitm::applet::g_vic_armed, mitm::applet::g_vic_execute,
                               mitm::applet::g_dbg_armed, mitm::applet::g_dump_armed,
                               g_usb_armed, mitm::applet::g_bench_armed,
                               mitm::applet::g_nvenc_armed, mitm::applet::g_nvjpg_armed,
                               mitm::applet::g_sweep_armed, mitm::applet::g_matrix_armed,
                               mitm::applet::g_stream_armed, mitm::applet::g_grc_armed,
-                              mitm::applet::g_grcscan_armed, mitm::applet::g_clk_armed,
+                              mitm::applet::g_clk_armed,
                               mitm::applet::g_jpgdec_armed, mitm::applet::g_nvgrc_armed,
                               mitm::applet::g_csc_armed, mitm::applet::g_nvframe_armed, mitm::applet::g_nvframe_n,
                               mitm::applet::g_nvstream_armed, mitm::applet::g_nvstream_n, mitm::applet::g_nvstream_qp,

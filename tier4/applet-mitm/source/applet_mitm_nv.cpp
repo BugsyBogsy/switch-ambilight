@@ -48,7 +48,6 @@
 #include "applet_mitm_shot.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_donor.hpp"
-#include "applet_mitm_audio.hpp"
 #include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_ambi_core.hpp"
@@ -101,7 +100,6 @@ namespace ams::mitm::applet {
     constinit bool g_sweep_armed   = false;
     constinit bool g_stream_auto   = true;   /* pick the size from the link speed */
     constinit bool g_matrix_armed  = false;
-    constinit bool g_grcscan_armed = false;
     constinit bool g_jpgdec_armed  = false;
     constinit bool g_nvgrc_armed   = false;
     constinit bool g_csc_armed     = false;
@@ -209,12 +207,8 @@ namespace ams::mitm::applet {
         constinit u8       *g_vic_dst_buf = nullptr;
         constinit u8       *g_vic_src_buf = nullptr;
         constinit u8       *g_ind_buf     = nullptr;
-        /* v0.7.13: past the stream's g_ind_size, the capture region's tail holds
-         * the screenshot PNG's buffer, the audio stage and the audio ring -
-         * memory from the donor while a viewer is connected, instead of 224 KB
-         * of .bss in the System group the boot needs (#15) */
-        constexpr size_t AudioStageSize = 32 * 1024;   /* ~170 ms - more than a frame ever carries */
-        constexpr size_t CaptureTailBytes = ShotOutBufSize + AudioStageSize + AudioRingBytes;
+        /* PNG screenshots are the only users of the capture region tail. */
+        constexpr size_t CaptureTailBytes = ShotOutBufSize;
         /* v0.7.14: what a donor's capture region must hold - a whole slot copy,
          * the stream stages CaptureAcquire points past it, and the tail. The
          * donor's smallest size (tier4/donor/source/main.c sizes_mb[], less its
@@ -224,13 +218,9 @@ namespace ams::mitm::applet {
         constexpr size_t SmallestDonorBytes = 22 * 1024 * 1024 - 0x40000;
         static_assert(VicBaseHeap + MinCaptureBytes <= SmallestDonorBytes,
                       "the donor's smallest size must hold the engine buffers and the capture region");
-        constinit u8       *g_shot_out    = nullptr;
-        constinit u8       *g_audio_stage = nullptr;
-        constinit u8       *g_audio_ring  = nullptr;
+        constinit u8 *g_shot_out = nullptr;
         void SetCaptureTail(u8 *tail) {
-            g_shot_out    = tail;
-            g_audio_stage = tail != nullptr ? tail + ShotOutBufSize : nullptr;
-            g_audio_ring  = tail != nullptr ? tail + ShotOutBufSize + AudioStageSize : nullptr;
+            g_shot_out = tail;
         }
         /* cached heap past the nvmap'd block-row, used to stage uncached engine
          * output before it goes to the filesystem */
@@ -1235,7 +1225,6 @@ namespace ams::mitm::applet {
         void TryNvjpgProbe(u32 nvmap_fd, u32 cmd_handle, u32 dst_handle);
         void TryNvjpgDecodeControl(u32 nvmap_fd, u32 cmd_handle, u32 dst_handle);
 
-        void TryGrcScan();
         void TryCscSweep(u32 vfd, u32 cmd_handle, u32 syncpt, u32 cfg_addr, u32 dst_addr, u32 self_addr);
 
         /* M86: why a stream ended - live mode decides what to wait for next */
@@ -2419,7 +2408,6 @@ namespace ams::mitm::applet {
         /* M81: the observer goes first. It touches no engine, and this way it
          * reads grc's status blocks before any job of ours has shared NVENC
          * with grc. */
-        if (g_grcscan_armed) { TryGrcScan(); }
         /* M76: the positive control goes first among the engine jobs. If it
          * wedges the engine, nothing after it would be informative anyway. */
         if (g_jpgdec_armed) { TryNvjpgDecodeControl(nvmap_fd, cmd_handle, dst_handle); }
@@ -5920,408 +5908,7 @@ namespace ams::mitm::applet {
          * it 1:1. Handheld it renders 1280x720 into the corner; the VIC then
          * scales that UP, which tests the encoder at 1080p but not a native
          * picture - the log says which. Nothing here needs USB. */
-                /* ---- M75: the grc observer ---------------------------------------
-         *
-         * M72-M74 cost three forced power-offs. Every one came from the same
-         * mechanism: we opened a channel to an engine, submitted work that
-         * never completed, and the teardown took the compositor with it.
-         * host1x is shared and nvnflinger is on the other side of it.
-         *
-         * So this observes and submits nothing at all. No channel, no cmdbuf,
-         * no engine contact of any kind. It attaches to grc - the system's own
-         * recorder, the one client known to drive NVENC successfully on this
-         * firmware - resumes it immediately, reads its memory, and detaches.
-         *
-         * That is exactly the mechanism already used on the game's framebuffer
-         * at 60 fps without incident, pointed at a different process. The one
-         * thing at risk is grc itself, not the display.
-         *
-         * What we are looking for is grc's nvenc_h264_drv_pic_setup_s. Its
-         * first word is a magic constant, which makes it findable by scanning,
-         * and it is the single most valuable artifact available: the exact
-         * configuration a working client hands this engine. Also searched for
-         * is a host1x SETCL to class 0x21, which would give the real method
-         * sequence - including any method we never emit. */
-        constexpr u64 GrcProgramIdValue = 0x0100000000000035ull;
-
-        struct ScanHit { u64 addr; u32 kind; u32 word0, word1, word2, word3; };
-
-        void TryGrcScan() {
-            VicStage("grcscan:1");
-            LogLine("   ---- GRC OBSERVER (read-only; no channel, no submit) ----");
-
-            os::ProcessId pid = {};
-            {
-                const Result r = ::ams::pm::dmnt::GetProcessId(std::addressof(pid), ncm::ProgramId{GrcProgramIdValue});
-                LogLine("   pm:dmnt GetProcessId(%016llx) rc=0x%x -> pid=%llu",
-                        static_cast<unsigned long long>(GrcProgramIdValue), r.GetValue(),
-                        static_cast<unsigned long long>(pid.value));
-                if (R_FAILED(r) || pid.value == 0) {
-                    LogLine("   grc is not running - nothing to observe");
-                    VicStage("grcscan:no_proc");
-                    return;
-                }
-            }
-
-            ::ams::svc::Handle dbg = ::ams::svc::InvalidHandle;
-            const Result r_attach = ::ams::svc::DebugActiveProcess(std::addressof(dbg), pid.value);
-            LogLine("   DebugActiveProcess rc=0x%x", r_attach.GetValue());
-            if (R_FAILED(r_attach)) { VicStage("grcscan:no_attach"); return; }
-
-            /* Resume grc at once. Attaching stops it, and a stopped recorder
-             * is the only thing this run can plausibly disturb - so the window
-             * is made as short as the API allows, before any scanning. */
-            u32 nev = 0;
-            {
-                ::ams::svc::DebugEventInfo ev;
-                while (nev < 256 && R_SUCCEEDED(::ams::svc::GetDebugEvent(std::addressof(ev), dbg))) { ++nev; }
-                const Result rc = ::ams::svc::ContinueDebugEvent(dbg,
-                                      ::ams::svc::ContinueFlag_ExceptionHandled | ::ams::svc::ContinueFlag_ContinueAll,
-                                      nullptr, 0);
-                LogLine("   drained %u events; ContinueDebugEvent rc=0x%x -> grc %s",
-                        nev, rc.GetValue(), R_SUCCEEDED(rc) ? "RESUMED" : "STILL HALTED");
-            }
-
-            static constexpr u32 NvencMagics[4] = { 0xd0b70006u, 0xc1b70006u, 0xc0b70006u, 0xa0b70006u };
-            /* SETCL word: opcode 0, offset 0, class in bits 15:6. */
-            const u32 setcl_nvenc = vic::Host1xOpcodeSetClass(0, 0x21, 0);
-            const u32 setcl_nvjpg = vic::Host1xOpcodeSetClass(0, 0xC0, 0);
-            /* M79: SET_IN_DRV_PIC_SETUP as a method-offset value. Run D found
-             * grc's setups and not one NVENC SETCL - like oss-nvjpg on Horizon,
-             * grc evidently leaves the class to nvservices - so its command
-             * buffers are found by the write that points the engine at a
-             * setup, whichever opcode carries it. */
-            constexpr u32 MethodDrvPicSetup = 0x710u >> 2;
-
-            /* g_ind_buf is the scratch this scan reads into; it only exists
-             * once the VIC heap is up, so "vic" must be armed alongside. */
-            if (g_ind_buf == nullptr || g_ind_size < 64 * 1024) {
-                LogLine("   no scratch buffer (arm \"vic\" too) - skipping the scan");
-                static_cast<void>(::ams::svc::CloseHandle(dbg));
-                VicStage("grcscan:no_scratch");
-                return;
-            }
-
-            enum : u32 { Hit_SetclEnc = 5, Hit_SetclJpg = 6, Hit_Method = 7, Hit_SetclVic = 8, Hit_Status = 9, NumKinds = 10 };
-            const u32 setcl_vic = vic::Host1xOpcodeSetClass(0, 0x5D, 0);
-            /* M81: grc's own NVENC status blocks, found by content. Run F's
-             * job came back with error_status = 2 and an otherwise perfect
-             * encode; if grc's frames - which record and play back fine -
-             * carry the same flag, it is benign. */
-            u32 status_err_hist[4] = {}, status_ucode_nonzero = 0;
-            u32 nvic_dumps = 0;
-            static constexpr u32 MaxVicDumps = 4;
-            static constexpr u32 MaxLogged = 32;
-            ScanHit hits[MaxLogged] = {};
-            u32 nlogged = 0, nkind[NumKinds] = {};
-            u32 nregions = 0, nskipped = 0;
-            u64 scanned = 0, skipped_bytes = 0;
-            /* M79: M78 stopped at a 96 MB cap in address order and may never
-             * have reached grc's command buffers. Command buffers and setups
-             * live in small allocations, so every region up to 8 MB is scanned
-             * in full and only larger ones (frame and bitstream storage) are
-             * skipped - each one noted, so nothing is silently left out. */
-            constexpr u64 MaxRegion = 8ull * 1024 * 1024;
-            constexpr u64 ScanCap   = 256ull * 1024 * 1024;
-            constexpr u64 ChunkSize = 64 * 1024;
-
-            /* M78: every hit is dumped, not just located, as records in the
-             * M72 recorder's format (tools/nvrec.py, tools/nvsetup-dump),
-             * built in the cached stage buffer and written with
-             * WriteSdVerified after detaching. M79: a CMDBUF record's `rq`
-             * field carries the offset of the hit inside its payload. */
-            constexpr size_t RecCap = 0x40000;
-            u8 *const rec = g_stage_buf;
-            size_t rec_len = 0;
-            const bool can_dump = rec != nullptr && 2 * RecCap <= StreamStageSize && g_ind_size >= FbBlockRowStage + 2 * RecCap;
-            auto rec_put = [&](u16 kind, u32 rq, u32 a, u32 b, const void *payload, u32 len) -> u8 * {
-                if (!can_dump || rec_len + 32 + len > RecCap) { return nullptr; }
-                const u32 ms = static_cast<u32>(armTicksToNs(armGetSystemTick()) / UINT64_C(1000000));
-                const u32 hdr[8] = { 0x4352564Eu, static_cast<u32>(kind) | (32u << 16), 0, rq, a, b, len, ms };
-                std::memcpy(rec + rec_len, hdr, sizeof(hdr));
-                u8 *body = rec + rec_len + 32;
-                if (payload != nullptr) { std::memcpy(body, payload, len); }
-                rec_len += 32 + len;
-                return body;
-            };
-            char note[160];
-            auto rec_note = [&](int n) {
-                if (n > 0) { rec_put(9, 0, 0, 0, note, static_cast<u32>(n < static_cast<int>(sizeof(note)) ? n : sizeof(note) - 1)); }
-            };
-            /* read `len` bytes of grc at `va` straight into a new record */
-            u32 ndumped = 0;
-            auto dump = [&](u16 kind, u32 rq, u64 va, u32 len) -> u8 * {
-                u8 *body = rec_put(kind, rq, static_cast<u32>(va >> 32), static_cast<u32>(va), nullptr, len);
-                if (body == nullptr) { return nullptr; }
-                if (!DbgRead(dbg, body, va, len)) {
-                    std::memset(body, 0, len);
-                    rec_note(std::snprintf(note, sizeof(note), "dump @ %#llx: DbgRead failed - payload zeroed",
-                                           static_cast<unsigned long long>(va)));
-                    return nullptr;
-                }
-                ++ndumped;
-                return body;
-            };
-
-            /* setups worth watching: magic, and a picture size and profile that
-             * make sense (Run D's two heap hits were some other object) */
-            static constexpr u32 MaxSetups = 6;
-            u64 setup_va[MaxSetups] = {};
-            u32 nsetups = 0;
-            auto plausible = [](const u8 *p) {
-                nvenc_h264_drv_pic_setup_s st;
-                std::memcpy(std::addressof(st), p, sizeof(st));
-                const u32 w = st.input_cfg.frame_width_minus1 + 1u, h = st.input_cfg.frame_height_minus1 + 1u;
-                return st.sps_data.profile_idc != 0 && w >= 16 && w <= 4096 && h >= 16 && h <= 4096;
-            };
-
-            /* command-buffer windows: 2 KB from 0x200 before each hit, at most
-             * two per region and twelve in all */
-            struct Win { u64 va; u32 len; u32 hit_off; };
-            static constexpr u32 MaxWins = 12;
-            Win wins[MaxWins] = {};
-            u32 nwins = 0;
-            /* scan-time dump budgets, so a process full of magic-bearing
-             * objects cannot use up the record buffer before the command
-             * buffers and the watch get their turn */
-            u32 nmagic_dumps = 0, nsetcl_dumps = 0;
-            static constexpr u32 MaxMagicDumps = 8, MaxSetclDumps = 4;
-
-            u64 addr = 0;
-            for (u32 steps = 0; steps < 8000; ++steps) {
-                ::ams::svc::MemoryInfo mi = {};
-                ::ams::svc::PageInfo   pi = {};
-                if (!DbgQuery(dbg, std::addressof(mi), std::addressof(pi), addr)) { break; }
-                if (mi.size == 0) { break; }
-
-                const u32 perm  = static_cast<u32>(mi.permission);
-                const u32 state = static_cast<u32>(mi.state);
-                const bool readable = (perm & ::ams::svc::MemoryPermission_Read) != 0;
-                /* Code and stack are not where a driver config struct lives. */
-                const bool interesting = readable && mi.size >= 0x1000 &&
-                                         state != static_cast<u32>(::ams::svc::MemoryState_Free) &&
-                                         state != static_cast<u32>(::ams::svc::MemoryState_Code) &&
-                                         state != static_cast<u32>(::ams::svc::MemoryState_AliasCode);
-
-                if (interesting && mi.size > MaxRegion) {
-                    ++nskipped;
-                    skipped_bytes += mi.size;
-                    rec_note(std::snprintf(note, sizeof(note), "skipped region %#llx+%#llx state %#x perm %#x (over 8 MB)",
-                                           static_cast<unsigned long long>(mi.base_address),
-                                           static_cast<unsigned long long>(mi.size), state, perm));
-                } else if (interesting && scanned < ScanCap) {
-                    ++nregions;
-                    u32 region_wins = 0;
-                    const u64 region_end = mi.base_address + mi.size;
-                    for (u64 off = 0; off < mi.size && scanned < ScanCap; off += ChunkSize) {
-                        const u64 n = (mi.size - off < ChunkSize) ? (mi.size - off) : ChunkSize;
-                        if (!DbgRead(dbg, g_ind_buf, mi.base_address + off, n)) { break; }
-                        scanned += n;
-                        const u32 *w = reinterpret_cast<const u32 *>(g_ind_buf);
-                        const u64 nw = n / 4;
-                        for (u64 i = 0; i + 4 < nw; ++i) {
-                            u32 kind = 0;
-                            for (u32 m = 0; m < 4; ++m) { if (w[i] == NvencMagics[m]) { kind = 1 + m; } }
-                            /* M78: a SETCL counts only if the next word writes the
-                             * method-offset register (0x10) with INCR, NONINCR or
-                             * MASK. */
-                            const u32 nx = w[i + 1] >> 16;
-                            /* M81: or a write to THI register 0x0B, which is what
-                             * grc's NVENC jobs do right after SETCL (Run E) */
-                            const bool method_next = nx == 0x1010 || nx == 0x2010 || nx == 0x3010 || nx == 0x100b;
-                            if (kind == 0 && w[i] == setcl_nvenc && method_next) { kind = Hit_SetclEnc; }
-                            if (kind == 0 && w[i] == setcl_nvjpg && method_next) { kind = Hit_SetclJpg; }
-                            if (kind == 0 && w[i] == setcl_vic   && method_next) { kind = Hit_SetclVic; }
-                            if (kind == 0 && i + 11 < nw) {
-                                /* nvenc_pic_stat_s: 3600 MBs (720p), pic_type 0-3,
-                                 * 1-64 slices, a bit count that fits the buffer */
-                                const u32 mbs = (w[i + 10] & 0xFFFF) + (w[i + 10] >> 16);
-                                const u32 pt = w[i + 4] & 0xFFFF, ns = w[i + 4] >> 16;
-                                if (mbs == 3600 && pt <= 3 && ns >= 1 && ns <= 64 &&
-                                    w[i + 2] != 0 && w[i + 2] <= 1382400u * 8 && w[i + 9] <= 1382400u) {
-                                    kind = Hit_Status;
-                                    ++status_err_hist[w[i + 1] & 3];
-                                    if ((w[i + 1] >> 2) != 0) { ++status_ucode_nonzero; }
-                                    if (nkind[Hit_Status] < 32) rec_note(std::snprintf(note, sizeof(note),
-                                             "grc status @ %#llx: picture_index %#x error_status %u ucode %#x bits %u pic_type %u slices %u avgQP %u intra/inter %u/%u",
-                                             static_cast<unsigned long long>(mi.base_address + off + i * 4),
-                                             w[i], w[i + 1] & 3, w[i + 1] >> 2, w[i + 2], pt, ns, w[i + 5] >> 16,
-                                             w[i + 10] & 0xFFFF, w[i + 10] >> 16));
-                                }
-                            }
-                            const u32 op = w[i] >> 16;
-                            if (kind == 0 && (((op == 0x1010 || op == 0x2010 || op == 0x3010) && w[i + 1] == MethodDrvPicSetup) ||
-                                              w[i] == (0x40100000u | MethodDrvPicSetup))) {
-                                kind = Hit_Method;
-                            }
-                            if (kind == 0) { continue; }
-                            ++nkind[kind];
-                            const u64 hit_addr = mi.base_address + off + i * 4;
-                            /* Run E had 326 method writes; list only the first 8 so
-                             * the other kinds still get a line each */
-                            const bool list_it = kind != Hit_Method || nkind[Hit_Method] <= 8;
-                            if (list_it && nlogged < MaxLogged) { hits[nlogged++] = { hit_addr, kind, w[i], w[i+1], w[i+2], w[i+3] }; }
-
-                            if (kind <= 4 && nmagic_dumps < MaxMagicDumps) {
-                                ++nmagic_dumps;
-                                /* 4 KB of setup: the 512-byte header plus the
-                                 * control arrays pic_control points into */
-                                u32 want = 0x1000u;
-                                if (hit_addr + want > region_end) { want = static_cast<u32>(region_end - hit_addr) & ~3u; }
-                                rec_note(std::snprintf(note, sizeof(note), "setup magic @ %#llx in region %#llx+%#llx state %#x perm %#x",
-                                                       static_cast<unsigned long long>(hit_addr),
-                                                       static_cast<unsigned long long>(mi.base_address),
-                                                       static_cast<unsigned long long>(mi.size), state, perm));
-                                const u8 *body = dump(8, 0, hit_addr, want);
-                                if (body != nullptr && want >= sizeof(nvenc_h264_drv_pic_setup_s) && plausible(body) && nsetups < MaxSetups) {
-                                    setup_va[nsetups++] = hit_addr;
-                                }
-                            } else if (kind == Hit_SetclEnc && nsetcl_dumps < MaxSetclDumps) {
-                                ++nsetcl_dumps;
-                                u32 want = 0x400u;
-                                if (hit_addr + want > region_end) { want = static_cast<u32>(region_end - hit_addr) & ~3u; }
-                                rec_note(std::snprintf(note, sizeof(note), "NVENC SETCL @ %#llx", static_cast<unsigned long long>(hit_addr)));
-                                dump(7, 0, hit_addr, want);
-                            } else if (kind == Hit_SetclVic && nvic_dumps < MaxVicDumps) {
-                                /* M81: does grc drive the VIC too? A working VIC job
-                                 * would show how the RGB -> YUV matrix is really set */
-                                ++nvic_dumps;
-                                u32 want = 0x400u;
-                                if (hit_addr + want > region_end) { want = static_cast<u32>(region_end - hit_addr) & ~3u; }
-                                rec_note(std::snprintf(note, sizeof(note), "VIC SETCL @ %#llx in region %#llx+%#llx state %#x",
-                                                       static_cast<unsigned long long>(hit_addr),
-                                                       static_cast<unsigned long long>(mi.base_address),
-                                                       static_cast<unsigned long long>(mi.size), state));
-                                dump(7, 0, hit_addr, want);
-                            } else if (kind == Hit_Method && region_wins < 2 && nwins < MaxWins) {
-                                bool covered = false;
-                                for (u32 k = 0; k < nwins; ++k) {
-                                    if (hit_addr >= wins[k].va && hit_addr < wins[k].va + wins[k].len) { covered = true; }
-                                }
-                                if (!covered) {
-                                    const u64 ws = (hit_addr - mi.base_address > 0x200) ? hit_addr - 0x200 : mi.base_address;
-                                    u32 wl = 0x800u;
-                                    if (ws + wl > region_end) { wl = static_cast<u32>(region_end - ws) & ~3u; }
-                                    wins[nwins] = { ws, wl, static_cast<u32>(hit_addr - ws) };
-                                    rec_note(std::snprintf(note, sizeof(note), "SET_IN_DRV_PIC_SETUP write @ %#llx (+%#x in the dump) in region %#llx+%#llx state %#x",
-                                                           static_cast<unsigned long long>(hit_addr), wins[nwins].hit_off,
-                                                           static_cast<unsigned long long>(mi.base_address),
-                                                           static_cast<unsigned long long>(mi.size), state));
-                                    dump(7, wins[nwins].hit_off, ws, wl);
-                                    ++nwins;
-                                    ++region_wins;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                const u64 next = mi.base_address + mi.size;
-                if (next <= addr) { break; }
-                addr = next;
-            }
-
-            /* ---- M79: watch grc's setup ring --------------------------------
-             * Run D caught three P-frame setups (frame_num 1 and 2). The first
-             * job we replay should be an intra frame, which needs no reference
-             * picture, so poll the plausible setups for up to three seconds and
-             * dump each new (slot, frame_num, pic_type), always keeping intra
-             * ones. At 30 fps and a GOP of 15 an intra frame comes every
-             * 0.5 s. When the first one shows up, the command-buffer windows
-             * are dumped again at that same moment. grc runs throughout; each
-             * pass drains any debug event so nothing is left halted. */
-            u32 polls = 0, extra_setups = 0, extra_nonintra = 0, nev_watch = 0;
-            bool intra_seen = false, cmd_redumped = false;
-            u32 seen_n = 0;
-            struct Seen { u32 slot; u32 frame_num; u32 pic_type; };
-            Seen seen[48] = {};
-            const u64 w0 = armTicksToNs(armGetSystemTick());
-            if (nsetups > 0) {
-                alignas(8) u8 hdr_buf[sizeof(nvenc_h264_drv_pic_setup_s)];
-                while (armTicksToNs(armGetSystemTick()) - w0 < UINT64_C(3000000000)) {
-                    ++polls;
-                    {
-                        ::ams::svc::DebugEventInfo ev;
-                        u32 n = 0;
-                        while (n < 64 && R_SUCCEEDED(::ams::svc::GetDebugEvent(std::addressof(ev), dbg))) { ++n; }
-                        if (n != 0) {
-                            nev_watch += n;
-                            static_cast<void>(::ams::svc::ContinueDebugEvent(dbg,
-                                ::ams::svc::ContinueFlag_ExceptionHandled | ::ams::svc::ContinueFlag_ContinueAll, nullptr, 0));
-                        }
-                    }
-                    for (u32 k = 0; k < nsetups; ++k) {
-                        if (!DbgRead(dbg, hdr_buf, setup_va[k], sizeof(hdr_buf))) { continue; }
-                        nvenc_h264_drv_pic_setup_s st;
-                        std::memcpy(std::addressof(st), hdr_buf, sizeof(st));
-                        const u32 fn = st.pic_control.frame_num, pt = st.pic_control.pic_type;
-                        bool known = false;
-                        for (u32 j = 0; j < seen_n; ++j) {
-                            if (seen[j].slot == k && seen[j].frame_num == fn && seen[j].pic_type == pt) { known = true; }
-                        }
-                        if (known) { continue; }
-                        if (seen_n < 48) { seen[seen_n++] = { k, fn, pt }; }
-                        const bool intra = pt >= 2;   /* 2 = I, 3 = IDR */
-                        if (extra_setups >= 8 || (!intra && extra_nonintra >= 3)) { continue; }
-                        rec_note(std::snprintf(note, sizeof(note), "watch +%llu ms: slot %u @ %#llx frame_num %u pic_type %u%s",
-                                               static_cast<unsigned long long>((armTicksToNs(armGetSystemTick()) - w0) / 1000000),
-                                               k, static_cast<unsigned long long>(setup_va[k]), fn, pt, intra ? " (INTRA)" : ""));
-                        if (dump(8, 0, setup_va[k], 0x1000) != nullptr) {
-                            ++extra_setups;
-                            if (!intra) { ++extra_nonintra; }
-                        }
-                        if (intra && !cmd_redumped) {
-                            rec_note(std::snprintf(note, sizeof(note), "intra frame seen: command-buffer windows dumped again now"));
-                            for (u32 j = 0; j < nwins; ++j) { dump(7, wins[j].hit_off, wins[j].va, wins[j].len); }
-                            cmd_redumped = true;
-                        }
-                        intra_seen = intra_seen || intra;
-                    }
-                    if (intra_seen && extra_nonintra >= 2) { break; }
-                    os::SleepThread(TimeSpan::FromMilliSeconds(5));
-                }
-            }
-            const u64 watch_ms = (armTicksToNs(armGetSystemTick()) - w0) / 1000000;
-
-            static_cast<void>(::ams::svc::CloseHandle(dbg));
-            LogLine("   scanned %llu KB across %u regions; skipped %u region(s) over 8 MB (%llu KB)%s",
-                    static_cast<unsigned long long>(scanned / 1024), nregions, nskipped,
-                    static_cast<unsigned long long>(skipped_bytes / 1024),
-                    scanned >= ScanCap ? "  (hit the 256 MB cap)" : "");
-            LogLine("   hits: setup magic %u, NVENC SETCL %u, NVJPG SETCL %u, VIC SETCL %u, SET_IN_DRV_PIC_SETUP writes %u, NVENC status blocks %u",
-                    nkind[1] + nkind[2] + nkind[3] + nkind[4], nkind[Hit_SetclEnc], nkind[Hit_SetclJpg],
-                    nkind[Hit_SetclVic], nkind[Hit_Method], nkind[Hit_Status]);
-            LogLine("   grc's own NVENC status blocks: error_status 0:%u 1:%u 2:%u 3:%u, ucode_error_status non-zero in %u",
-                    status_err_hist[0], status_err_hist[1], status_err_hist[2], status_err_hist[3], status_ucode_nonzero);
-
-            static const char *KindName[NumKinds] = { "?", "NVENC magic 5.0", "NVENC magic 6.0",
-                                                      "NVENC magic 1.0", "MSENC magic 2.0",
-                                                      "SETCL class 0x21 (NVENC)", "SETCL class 0xC0 (NVJPG)",
-                                                      "SET_IN_DRV_PIC_SETUP write", "SETCL class 0x5D (VIC)",
-                                                      "NVENC status block" };
-            for (u32 i = 0; i < nlogged; ++i) {
-                LogLine("   hit %2u @ %#llx  %-26s  %08x %08x %08x %08x", i,
-                        static_cast<unsigned long long>(hits[i].addr),
-                        KindName[hits[i].kind < NumKinds ? hits[i].kind : 0],
-                        hits[i].word0, hits[i].word1, hits[i].word2, hits[i].word3);
-            }
-            LogLine("   plausible setups %u, command-buffer windows %u; watch: %u polls in %llu ms, %u new setups dumped, intra %s, %u debug events",
-                    nsetups, nwins, polls, static_cast<unsigned long long>(watch_ms), extra_setups,
-                    intra_seen ? "CAPTURED" : "not seen", nev_watch);
-            if (nkind[1] + nkind[2] + nkind[3] + nkind[4] + nkind[Hit_Method] == 0) {
-                LogLine("   nothing found. Either grc is idle and has not allocated its encoder");
-                LogLine("   buffers, or they are in memory this process cannot read.");
-            }
-            if (!can_dump) {
-                LogLine("   no cached stage buffer - hits logged above, nothing dumped");
-            } else if (rec_len != 0) {
-                LogLine("   dumped %u block(s) into %zu B of records -> sdmc:/grc-scan.bin (decode: tools/nvrec.py)", ndumped, rec_len);
-                WriteSdVerified("sdmc:/grc-scan.bin", rec, rec_len, rec + RecCap, nullptr);
-            }
-            VicStage("grcscan:done");
-        }
-
-                void VicWorkerThread(void *) {
+                        void VicWorkerThread(void *) {
             bool ui_started = false;
             for (;;) {
                 os::SleepThread(TimeSpan::FromMilliSeconds(200));
