@@ -889,7 +889,7 @@
                 dyn_out = 0;
                 dyn_center = false;
                 /* v0.7.16: a viewer that never said it draws crops (SFTC) gets them scaled here */
-                dyn_vic = g_uvc_mode || !g_viewer_crop.load(std::memory_order_relaxed);
+                dyn_vic = !g_viewer_crop.load(std::memory_order_relaxed);
                 if (!size_check_ok) { CropToPresent(g_strip_src); }
                 else { CropDynamic(g_strip_src, g_strip_out); }   /* v0.7.15 */
                 CropCentered(g_strip_src, g_strip_out);             /* v0.7.16 */

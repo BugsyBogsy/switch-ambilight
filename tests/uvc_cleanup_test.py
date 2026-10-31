@@ -17,3 +17,6 @@ assert "TryAmbilightStream(dbg, slot_base" in nv
 assert "TryAmbilightStream(dbg, base" in nv
 assert "NetAmbilightSend(rgb, sizeof(rgb))" in nv
 print("OK: UVC webcam removed, USB gadget disabled, WLED capture retained")
+
+capture=(root/"ambi_capture_session.inc").read_text()
+assert "g_uvc_mode" not in capture and "g_uvc_raw" not in capture

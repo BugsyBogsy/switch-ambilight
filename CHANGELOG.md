@@ -1,5 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove last UVC-mode condition from shared VIC crop handling, retaining normal viewer-crop behavior.
+
 - Update legacy audio regression test to require complete source removal instead of disabled audio stubs.
 
 - Remove USB UVC webcam device implementation and uncompressed NV12 webcam stream.
