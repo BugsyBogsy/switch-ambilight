@@ -5177,9 +5177,6 @@ namespace ams::mitm::applet {
             u32 cur = 0, cur_uv = 0;  /* M94: 0 = the layout's picture */
         };
 
-        constinit bool g_nvf_last_fence_done = false, g_nvf_last_ours = false;
-        constinit u32  g_nvf_last_fence = 0, g_nvf_last_pic = 0;
-
         /* One job, grc's shape, RCMODE 0. Returns 0 done, 1 rejected, 2 no
          * status within 1 s (the caller treats that as a stall). */
         /* M94: submit only. 0 submitted (fence and start time out), 1 rejected. */
@@ -5208,20 +5205,7 @@ namespace ams::mitm::applet {
         static_assert(BlOffset(1300, 10, 1920, 4) == Mk8Offset(1300, 10) && BlOffset(1900, 1070, 1920, 4) == Mk8Offset(1900, 1070) &&
                       BlOffset(10, 740, 1920, 4) == Mk8Offset(10, 740) && BlOffset(1279, 719, 1920, 4) == Mk8Offset(1279, 719));
 
-        /* All zero outside the top-left 1280x720 means handheld content. */
-        bool SlotContentIs720(const u8 *slot, u32 *out_samples, u32 stride_px, u32 bh_log2) {
-            auto px = [&](u32 x, u32 y) -> const u8 * { return slot + BlOffset(x, y, stride_px, bh_log2); };
-            u32 n = 0;
-            bool zero = true;
-            for (u32 y = 10; y < 1080; y += 100) {
-                for (u32 x = 1300; x < 1920; x += 100) { const u8 *p = px(x, y); zero &= (p[0] | p[1] | p[2]) == 0; ++n; }
-            }
-            for (u32 y = 740; y < 1080; y += 50) {
-                for (u32 x = 10; x < 1280; x += 150) { const u8 *p = px(x, y); zero &= (p[0] | p[1] | p[2]) == 0; ++n; }
-            }
-            *out_samples = n;
-            return zero;
-        }
+        /* Removed unused 720p slot test after H.264 streaming deletion. */
 
         /* v0.7.3: what a 1080p slot holds, for the 720p/1080p decision. Smash
          * drawing 720p into the corner after docked mode leaves the docked
@@ -5542,37 +5526,7 @@ namespace ams::mitm::applet {
         static_assert(sizeof(nvenc_1080p::IdrSetup) == 0x1000 && sizeof(nvenc_1080p::PSetup) == 0x1000);
         static_assert(nvenc_1080p::HistSize <= LxHistMax && 1920u * 1088u * 3u / 2u <= LxRefSize);
 
-        NvfLayout MakeLayout(u32 w, u32 h, const u8 *idr, const u8 *p, const u8 *hdrs, u32 hdrs_len) {
-            NvfLayout L = {};
-            L.w = w; L.h = h;
-            L.out = OutDesc{ w, h, w, vic::PIXFMT_Y8_U8V8_N420, vic::BLK_KIND_GENERIC_16Bx2, 1 };
-            L.luma = Nv12LumaBytes(L.out);
-            L.chroma = Nv12ChromaBytes(L.out);
-            L.off_setup = NvfOffSetup; L.off_status = NvfOffStatus; L.off_rc = LxRc; L.off_cmd = LxCmd;
-            L.off_bits = LxBits; L.bits_size = nvenc_1080p::BitsSize; L.off_hist = LxBits + nvenc_1080p::BitsSize;
-            L.off_cur = L.off_hist + LxHistMax;
-            L.off_cur_uv = L.off_cur + L.luma;
-            L.off_ref_out = (L.off_cur_uv + L.chroma + 0xFFF) & ~0xFFFu;
-            L.arena_size = L.off_ref_out + LxRefSize;
-            L.off_setup_p = L.arena_size; L.off_ref_b = L.off_setup_p + 0x1000;
-            L.off_me_a = L.off_ref_b + LxRefSize; L.off_me_b = L.off_me_a + LxMeSize;
-            L.arena_size_p = L.off_me_b + LxMeSize;
-            L.off_cur2 = L.arena_size_p;
-            L.off_cur2_uv = L.off_cur2 + L.luma;
-            L.arena_size_pipe = (L.off_cur2_uv + L.chroma + 0xFFFu) & ~0xFFFu;
-            L.idr_setup = idr; L.p_setup = p; L.hdrs = hdrs; L.hdrs_len = hdrs_len;
-            return L;
-        }
-
-        /* M92: the VIC writes 1080 rows into planes that are 1088 rows (16-row
-         * blocks); NVENC codes all 1088 (nvenc_1080p.h: 1920x1088 surfaces,
-         * the only 1080p-class size that completes - Run R) and the SPS in
-         * SpsPps crops the bottom 8. */
-        const NvfLayout &Layout1080() {
-            static const NvfLayout L = MakeLayout(1920, 1080, nvenc_1080p::IdrSetup, nvenc_1080p::PSetup,
-                                                  nvenc_1080p::SpsPps, static_cast<u32>(sizeof(nvenc_1080p::SpsPps)));
-            return L;
-        }
+        /* Removed unused 1080p NVENC layout after H.264 streaming deletion. */
 
         /* v0.7.7: webcam-any - two pitch-linear NV12 pictures (the M70 raw
          * stream's VIC output), nothing for an encoder */

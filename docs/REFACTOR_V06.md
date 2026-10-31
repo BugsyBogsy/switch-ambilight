@@ -70,3 +70,7 @@ Moved the former capture implementation to `ambi_capture_session.inc`, included 
 ## Stage 4d: VIC capture no longer owns NVENC
 
 The capture component now always uses VIC; its `Open` path never opens `/dev/nvhost-msenc`, maps an encoder channel, waits for H.264 jobs, or sets up a codec picture. Removed encoder stall, clock and setup methods and the `NvfSession` compatibility adapter. Raw UVC and screenshots still use the common VIC capture owner. H.264-related constants/diagnostic scaffolding in the surrounding source remain to be cleaned after successful ARM64 tests.
+
+### Post-stream dead-code pruning
+
+Removed the old NVENC 1080p layout factory and unused 720p slot-content test plus orphan NVENC completion globals. The 320x180 VIC raw layout used by WLED remains unchanged.

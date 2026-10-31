@@ -1,5 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove unused NVENC 1080p layout generation, legacy 720p check and orphaned encoder job stats.
+
 - Make VIC capture truly encoder-free: delete the msenc device opening, channel mapping, encoder clock/stall logic, and encoder context fields.
 - Remove the unused legacy NvfSession adapter; share VIC capture directly with UVC/screenshots.
 

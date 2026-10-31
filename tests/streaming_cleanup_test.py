@@ -9,3 +9,6 @@ assert "AmbilightSession s;" in s
 assert "NetAmbilightSend(rgb, sizeof(rgb))" in s
 assert "sftambi::Sample(colors, Y, UV" in s
 print("OK: H.264 stream dispatch/encoder submit removed; WLED VIC path retained")
+
+for old in ("Layout1080(", "MakeLayout(", "SlotContentIs720(", "g_nvf_last_fence"):
+    assert old not in s, f"Unused H.264 helper restored: {old}"
