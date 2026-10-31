@@ -27,3 +27,5 @@ mkdir "$TEST_DIR/migration"
 
 # Verify standalone cleanup without needing the Switch toolchain.
 python3 "$ROOT/tests/legacy_audio_cleanup_test.py"
+
+python3 "$ROOT/tests/legacy_nvenc_cleanup_test.py"

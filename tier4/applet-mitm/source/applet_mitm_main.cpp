@@ -1112,7 +1112,7 @@ namespace ams {
         mitm::applet::g_uvc_raw     = mitm::applet::g_uvc_mode && ArmFileContains("uvcraw");   /* v0.7.7: webcam-any */
         mitm::applet::g_net_armed   = ArmFileContains("net");
         mitm::applet::g_bench_armed   = ArmFileContains("bench");
-        mitm::applet::g_nvenc_armed   = ArmFileContains("nvenc");
+        mitm::applet::g_nvenc_armed   = false; /* legacy NVENC probes removed */
         mitm::applet::g_nvjpg_armed   = ArmFileContains("jpg");
         mitm::applet::g_nvjpg_quality = ArmFileNumber("q", 85);
         mitm::applet::g_nvjpg_attempts = ArmFileNumber("jat", 90);
@@ -1121,9 +1121,9 @@ namespace ams {
         mitm::applet::g_grcscan_armed = ArmFileContains("grcscan");
         mitm::applet::g_clk_armed     = ArmFileContains("clk");
         mitm::applet::g_jpgdec_armed  = ArmFileContains("jpgdec");
-        mitm::applet::g_nvgrc_armed   = ArmFileContains("nvgrc");
+        mitm::applet::g_nvgrc_armed   = false; /* GRC replay removed */
         mitm::applet::g_csc_armed     = ArmFileContains("csc");
-        mitm::applet::g_nvframe_armed = ArmFileContains("nvframe");
+        mitm::applet::g_nvframe_armed = false; /* encoder experiment removed */
         mitm::applet::g_nvframe_n     = ArmFileNumber("nvframe", 120);
         mitm::applet::g_nvstream_armed = ArmFileContains("nvstream");
         mitm::applet::g_nvstream_n    = ArmFileNumber("nvstream", 3600);
@@ -1137,7 +1137,7 @@ namespace ams {
         mitm::applet::g_ui_stream_armed = ArmFileContains("homemenu");   /* v0.7.14: the HOME menu streams too */
         g_screen_off.store(ArmFileContains("screenoff"), std::memory_order_relaxed);
         mitm::applet::g_early_collect = ArmFileContains("earlyoff") ? 0 : ArmFileContains("earlyab") ? 2 : 1;
-        mitm::applet::g_nv1080_armed  = ArmFileContains("nv1080");
+        mitm::applet::g_nv1080_armed  = false; /* 1080p encoder probe removed */
         mitm::applet::g_nv1080_n      = ArmFileNumber("nv1080", 120);
         mitm::applet::g_cap720_armed  = ArmFileContains("cap720");
         mitm::applet::g_anyfw_armed   = ArmFileContains("anyfw");
@@ -1157,7 +1157,7 @@ namespace ams {
         mitm::applet::LoadStreamEnabled();
         mitm::applet::LoadExcluded();
         if (!mitm::applet::g_live_armed) { mitm::applet::g_live_state.store(mitm::applet::LiveState_NotArmed); }
-        mitm::applet::g_nvp_armed     = ArmFileContains("nvp");
+        mitm::applet::g_nvp_armed     = false; /* P-frame experiment removed */
         mitm::applet::g_nvp_n         = ArmFileNumber("nvp", 30);
         mitm::applet::g_matrix_mode   = ArmFileNumber("mtx", 1);
         mitm::applet::g_stream_armed  = ArmFileContains("stream");

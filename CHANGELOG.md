@@ -1,5 +1,9 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Remove NVENC magic/host1x probes, GRC IDR replay and standalone 720p/P-frame/1080p encoder experiments.
+- Disable unused debug arming tokens for the removed NVENC probes; retain VIC capture shared layout and legacy viewer encoder pending extraction.
+- Add NVENC-removal regression tests.
+
 - Remove `audout:u` interception, sound-memory probes and automatic audio-thread startup.
 - Explicitly disable audio capture in both config entrypoints; retain legacy NVENC audio helpers temporarily for ABI/build safety.
 - Add standalone-audio regression checks.
