@@ -1,6 +1,7 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
 - Fix ARM64 build script CRLF line endings; enforce Unix LF for shell files and add regression checks.
+- Fix the test runner's broken shell quoting and add a ZIP packaging fallback using Python 3.
 - Fix misleading v0.5.1 output filename in the v0.6 packaging script.
 
 - New own configuration directory with safe legacy fallback.

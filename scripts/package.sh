@@ -23,6 +23,24 @@ cp ambilight-manager/switch-ambilight.nro "$STAGE/switch/switch-ambilight/switch
 # The package contains a sample separately so it never overwrites existing settings.
 mkdir -p "$ROOT/dist"
 cp config.example.ini "$ROOT/dist/config.example.ini"
-(cd "$STAGE" && zip -qr "$ROOT/dist/switch-ambilight-v0.6.0-switch.zip" atmosphere switch)
+OUT="$ROOT/dist/switch-ambilight-v0.6.0-switch.zip"
+rm -f "$OUT"
+if command -v zip >/dev/null 2>&1; then
+    (cd "$STAGE" && zip -qr "$OUT" atmosphere switch)
+else
+    # Python is already required for the source/build tooling.
+    python3 - "$STAGE" "$OUT" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+stage = Path(sys.argv[1])
+output = Path(sys.argv[2])
+with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    for item in sorted(stage.rglob("*")):
+        if item.is_file():
+            archive.write(item, item.relative_to(stage).as_posix())
+PY
+fi
 printf 'Complete SD package: %s\n' "$ROOT/dist/switch-ambilight-v0.6.0-switch.zip"
 printf 'No existing config.ini is overwritten. See README before installing.\n'
