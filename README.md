@@ -4,7 +4,7 @@
 
 Switch Ambilight is an **experimental open-source Atmosphère sysmodule** that captures a low-resolution copy of game frames through the Switch's VIC graphics engine, samples their edges, and sends DDP/UDP colors to a WLED controller. It also includes a Tesla overlay and a Homebrew Menu settings application.
 
-> **Project status:** v0.5.1 source release. The v0.5 sysmodule, overlay and NRO were reported working on one Switch V2 (Mariko) with Atmosphère 1.12.1 / firmware 23.0.1 and 114 LEDs. This GitHub-ready source package changes the default destination IP and includes the previously tested NRO display fix. The full standalone release build has **not yet been independently reproduced**. Treat this as experimental software.
+> **Project status:** v0.6.0 refactor candidate (not yet hardware-tested). The v0.5 sysmodule, overlay and NRO were reported working on one Switch V2 (Mariko) with Atmosphère 1.12.1 / firmware 23.0.1 and 114 LEDs. This GitHub-ready source package changes the default destination IP and includes the previously tested NRO display fix. The full standalone release build has **not yet been independently reproduced**. Treat this as experimental software.
 
 ## Features
 
@@ -20,7 +20,7 @@ Switch Ambilight is an **experimental open-source Atmosphère sysmodule** that c
 - **Tested by the project user:** Mariko V2, Atmosphère 1.12.1, Nintendo firmware 23.0.1, a docked 1920×1080 output and WLED (114 LEDs).
 - **Not yet verified:** all Switch models, all firmware versions, every game, power consumption, wireless latency, and long-running stability.
 - **Fixed LED geometry in v0.5.1:** 36 top, 21 right, 36 bottom, 21 left. LED 0 starts at the **top-left**, moving clockwise around the display as seen from the front. Other arrangements require editing/recompiling the sampling implementation.
-- Current binaries inherit the sysmodule IDs and several internal services from Switch Frame Tap. **Do not install both projects simultaneously.** The legacy `config/switch-frame-tap/config.ini` path is kept for compatibility; changing it requires a coordinated update to the sysmodule, manager, overlay and launcher.
+- Current binaries inherit the sysmodule IDs and several internal services from Switch Frame Tap. **Do not install both projects simultaneously.** The legacy `config/switch-ambilight/config.ini` path is kept for compatibility; changing it requires a coordinated update to the sysmodule, manager, overlay and launcher.
 - The `0100000000000C21` launcher/memory donor is **required**. Do not delete it. Full removal of former streaming/audio code is future work, not a claim for this version.
 - Tesla/Ultrahand and a compatible overlay loader such as nx-ovlloader are required for the `.ovl` UI.
 
@@ -37,13 +37,13 @@ bash scripts/package.sh
 
 The build uses a Docker image derived from `devkitpro/devkita64:20260219` with libnx revision `b156b4774fb2df7b93402169509266da7547fc4c`, which exposes functions required by Atmosphère 1.12.1. The image is built automatically if unavailable. `scripts/setup.sh` checks out the Atmosphère 1.12.1 tag and libtesla headers. The capture sysmodule is built inside a copy of Atmosphère's tree using the inherited Switch Frame Tap build process.
 
-Successful output: `dist/switch-ambilight-v0.5.1-switch.zip`, containing **both system components** and the two menus.
+Successful output: `dist/switch-ambilight-v0.6.0-switch.zip`, containing **both system components** and the two menus.
 
 ## Installing (experimental)
 
 1. **Back up your SD card and working Atmosphère setup.** If updating an existing installation, save both `0100000000000C20` and `0100000000000C21`, plus your existing `config.ini`. You need Hekate SD access or a card reader for recovery from a boot failure.
-2. Power down the console completely. Extract the compiled `dist/switch-ambilight-v0.5.1-switch.zip` onto the root of its SD card.
-3. Configure `SD:/config/switch-frame-tap/config.ini` with the values from `config.example.ini`. **Change `ambi_ip` to your WLED device's IP**. Don't overwrite an existing working config blindly.
+2. Power down the console completely. Extract the compiled `dist/switch-ambilight-v0.6.0-switch.zip` onto the root of its SD card.
+3. Configure `SD:/config/switch-ambilight/config.ini` with the values from `config.example.ini`. **Change `ambi_ip` to your WLED device's IP**. Don't overwrite an existing working config blindly.
 4. Remove the old `switch/switch-frame-tap/switch-frame-tap.nro` and `switch/.overlays/switch-frame-tap.ovl` if present. Keep the two Atmosphère module folders. Ensure any stale root-level `applet-mitm.armed` debug file is absent.
 5. Disable any PC Hyperion instance controlling the same WLED LEDs. Boot Atmosphère, launch a game and check whether the colors match the display. You can adjust settings through the NRO or Tesla overlay.
 
@@ -57,7 +57,7 @@ SD:/
 ├── atmosphere/contents/0100000000000C21/toolbox.json
 ├── switch/.overlays/switch-ambilight.ovl
 ├── switch/switch-ambilight/switch-ambilight.nro
-└── config/switch-frame-tap/config.ini                     # user-created settings
+└── config/switch-ambilight/config.ini                     # user-created settings
 ```
 
 ### Settings
@@ -89,3 +89,11 @@ A sysmodule that hooks game graphics can cause crashes or failed boots. If this 
 This is a **GPL-2.0 licensed derivative** of [Switch Frame Tap](https://github.com/TomasUribe/switch-frame-tap) by TomasUribe and contributors, using [libtesla](https://github.com/WerWolv/libtesla) for the overlay and [WLED](https://github.com/wled/WLED) for lighting. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE) for attribution and terms.
 
 **Disclaimer:** Not affiliated with Nintendo or the original projects. No Nintendo copyrighted firmware or keys are included.
+
+## v0.6 development status
+
+Config now lives under `config/switch-ambilight/config.ini`, retaining legacy fallback and first-write migration. The audio/DVR patch synchronizer is removed. The graphics capture and donor still retain Switch Frame Tap code, so this is **not a full rewrite**. This candidate requires Docker compilation and Mariko regression testing. See [refactoring checklist](docs/REFACTOR_V06.md).
+
+### v0.6 audio cleanup (development branch)
+
+The experimental `audout:u` interceptor, sound probes and audio capture thread startup have been removed from this branch. The NVENC-era audio helper source remains while its associated encoder code is being audited. **Not hardware-tested at this refactoring stage.**

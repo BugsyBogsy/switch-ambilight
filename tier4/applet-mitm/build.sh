@@ -8,6 +8,8 @@ AMS="${AMS_TREE:-$REPO/ref/Atmosphere}"
 case "$AMS" in /*) ;; *) AMS="$REPO/$AMS" ;; esac
 TAG="${AMS_TREE:+-$(basename "$AMS")}"
 SRC=$REPO/tier4/applet-mitm
+# Prevent stale builds being mistaken for a new sysmodule.
+rm -f "$SRC/applet-mitm$TAG.nsp"
 DST=$AMS/stratosphere/applet-mitm
 IMG="${DKP_IMG:-devkitpro/devkita64:latest}"
 UIDGID="$(id -u):$(id -g)"
@@ -38,9 +40,11 @@ set -e
 
 OWN
 NSP="$(find "$DST/out" -name '*.nsp' | head -1)"
-[ -n "$NSP" ] && cp "$NSP" "$SRC/applet-mitm$TAG.nsp"
+if [ "$rc" -eq 0 ] && [ -n "$NSP" ] && [ -s "$NSP" ]; then
+  cp "$NSP" "$SRC/applet-mitm$TAG.nsp"
+fi
 
-if [ $rc -eq 0 ] && [ -f "$SRC/applet-mitm$TAG.nsp" ]; then
+if [ "$rc" -eq 0 ] && [ -s "$SRC/applet-mitm$TAG.nsp" ]; then
   ls -l "$SRC/applet-mitm$TAG.nsp"; echo OK
 else
   echo "BUILD FAILED (rc=$rc)"; exit 1

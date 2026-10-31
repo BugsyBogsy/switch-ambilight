@@ -3,6 +3,23 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Do not publish stale outputs from a failed compiler or an older commit.
+OUT="$ROOT/dist/switch-ambilight-v0.6.0-switch.zip"
+rm -f "$OUT"
+STAMP="$ROOT/dist/.build-success"
+if [[ ! -s "$STAMP" ]]; then
+  echo "No successful build for this checkout. Run: bash scripts/build.sh" >&2
+  exit 1
+fi
+read -r BUILD_COMMIT < "$STAMP"
+if [[ "$BUILD_COMMIT" != "$(git rev-parse --verify HEAD)" ]]; then
+  echo "Build belongs to another commit. Run: bash scripts/build.sh" >&2
+  exit 1
+fi
+if ! tail -n +2 "$STAMP" | sha256sum --check --status; then
+  echo "Build artifacts have changed since the successful build. Rebuild first." >&2
+  exit 1
+fi
 for f in tier4/applet-mitm/applet-mitm.nsp tier4/donor/sft-donor.nsp \
   ambilight-overlay/switch-ambilight.ovl ambilight-manager/switch-ambilight.nro; do
   [[ -s "$f" ]] || { echo "Missing $f. First run: bash scripts/build.sh" >&2; exit 1; }
@@ -23,6 +40,22 @@ cp ambilight-manager/switch-ambilight.nro "$STAGE/switch/switch-ambilight/switch
 # The package contains a sample separately so it never overwrites existing settings.
 mkdir -p "$ROOT/dist"
 cp config.example.ini "$ROOT/dist/config.example.ini"
-(cd "$STAGE" && zip -qr "$ROOT/dist/switch-ambilight-v0.5.1-switch.zip" atmosphere switch)
-printf 'Complete SD package: %s\n' "$ROOT/dist/switch-ambilight-v0.5.1-switch.zip"
+if command -v zip >/dev/null 2>&1; then
+    (cd "$STAGE" && zip -qr "$OUT" atmosphere switch)
+else
+    # Python is already required for the source/build tooling.
+    python3 - "$STAGE" "$OUT" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+stage = Path(sys.argv[1])
+output = Path(sys.argv[2])
+with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    for item in sorted(stage.rglob("*")):
+        if item.is_file():
+            archive.write(item, item.relative_to(stage).as_posix())
+PY
+fi
+printf 'Complete SD package: %s\n' "$ROOT/dist/switch-ambilight-v0.6.0-switch.zip"
 printf 'No existing config.ini is overwritten. See README before installing.\n'

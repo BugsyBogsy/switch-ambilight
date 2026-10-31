@@ -1,4 +1,4 @@
-// Switch Ambilight manager v0.5: compact controller-only NRO.
+// Switch Ambilight manager v0.6: compact controller-only NRO.
 // Uses libnx's built-in console; no SDL, HTTP, USB, encoder or viewer.
 #include <switch.h>
 #include <cstdio>
@@ -9,7 +9,7 @@
 #include "../../common/config_ini.hpp"
 
 namespace {
-constexpr const char* iniDir="sdmc:/config/switch-frame-tap";
+constexpr const char* iniDir="sdmc:/config/switch-ambilight";
 struct Status {
     u32 version,state,enabled,width,height,fps_x10,game_fps_x10,sessions;
     u32 shot_enabled,shots,shot_fails,reserved;
@@ -35,14 +35,14 @@ void Reload() {if(Connect()) serviceDispatch(&svc,2);}
 void Enable(bool on) {if(Connect()){u8 b=on?1:0;serviceDispatchIn(&svc,1,b);}}
 unsigned U(const char* key,unsigned d,unsigned max) {
     std::string s;
-    if(!sftini::Get(key,&s) || s.empty())return d;
+    if(!ambiini::Get(key,&s) || s.empty())return d;
     unsigned v=0;
     for(char c:s) {if(c<'0'||c>'9')return d;v=v*10+unsigned(c-'0');if(v>max)return d;}
     return v;
 }
 bool SetNum(const char* key,unsigned v) {
     char b[16];std::snprintf(b,sizeof(b),"%u",v);
-    if(!sftini::Set(key,b))return false;
+    if(!ambiini::Set(key,b))return false;
     Reload();return true;
 }
 unsigned Wrap(unsigned v,int delta,unsigned lo,unsigned hi) {
@@ -68,7 +68,7 @@ int main(int,char**) {
         if(key&HidNpadButton_Down) cur=(cur+1)%9;
         Status st{};bool have=Get(&st);
         std::string ip="192.168.1.50";
-        sftini::Get("ambi_ip",&ip);
+        ambiini::Get("ambi_ip",&ip);
         unsigned oct[4]={192,168,1,50};
         if(std::sscanf(ip.c_str(),"%u.%u.%u.%u",&oct[0],&oct[1],&oct[2],&oct[3])!=4 ||
            oct[0]>255 || oct[1]>255 || oct[2]>255 || oct[3]>255) {oct[0]=192;oct[1]=168;oct[2]=1;oct[3]=149;}
@@ -84,18 +84,18 @@ int main(int,char**) {
         if(delta && cur>=1 && cur<=4) {
             oct[cur-1]=Wrap(oct[cur-1],delta,cur==1?1:0,cur==1?223:255);
             char b[20];std::snprintf(b,sizeof(b),"%u.%u.%u.%u",oct[0],oct[1],oct[2],oct[3]);
-            changed=sftini::Set("ambi_ip",b);
+            changed=ambiini::Set("ambi_ip",b);
         }
         if(delta && cur==5)changed=SetNum("ambi_brightness",Wrap(brightness,delta*5,0,255));
         if(delta && cur==6)changed=SetNum("ambi_smoothing",Wrap(smoothing,delta*8,0,255));
         if(delta && cur==7)changed=SetNum("ambi_fps",Wrap(fps,delta,5,30));
         if(cur==8 && (key&HidNpadButton_A)) {
-            changed=sftini::Set("ambilight","1") && sftini::Set("audio","0") && sftini::Set("connection","network") && sftini::Set("home_menu","0") && sftini::Set("overlays","0");
+            changed=ambiini::Set("ambilight","1") && ambiini::Set("audio","0") && ambiini::Set("connection","network") && ambiini::Set("home_menu","0") && ambiini::Set("overlays","0");
         }
         if(changed) {Reload();msg="Saved. Sysmodule reloaded.";}
         else if(delta && cur!=0)msg="Save failed or no change";
         consoleClear();
-        std::printf("SWITCH AMBILIGHT  v0.5\n");
+        std::printf("SWITCH AMBILIGHT  v0.6\n");
         std::printf("Mariko | 114 LEDs: 36 / 21 / 36 / 21\n");
         std::printf("---------------------------------------\n");
         std::printf("%c Ambilight      : %s\n",cur==0?'>':' ',have?(st.enabled?"ON":"OFF"):"MODULE OFFLINE");

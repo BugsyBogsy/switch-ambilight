@@ -17,7 +17,6 @@
 #include "applet_mitm_sm.hpp"
 #include "applet_mitm_donor.hpp"
 #include "applet_mitm_am.hpp"
-#include "applet_mitm_audout.hpp"
 #include "applet_mitm_log.hpp"
 #include "applet_mitm_nv.hpp"
 #include "applet_mitm_nvdrv.hpp"
@@ -27,12 +26,9 @@
 #include "applet_mitm_clk.hpp"
 #include "applet_mitm_control.hpp"
 #include "applet_mitm_shot.hpp"
-#include "applet_mitm_audio.hpp"
-#include "applet_mitm_uvc.hpp"
 #include "applet_mitm_net.hpp"
 #include "applet_mitm_uibinder.hpp"
 #include "applet_mitm_uisource.hpp"
-#include "applet_mitm_soundprobe.hpp"
 #include "applet_mitm_ovlprobe.hpp"
 #include "applet_mitm_overlay.hpp"
 #include "applet_mitm_featmem.hpp"
@@ -54,7 +50,7 @@ namespace ams {
         /* v0.7.13: 96 KB, was 1 MB - every custom sysmodule shares a few MB
          * of the System group with am (#15), and the most ever in use was
          * 17 KB (Run v0713-ballast4-late: a game, the HOME menu, applets),
-         * plus SyncSoundPatches' 44 KB for a moment at boot */
+         * (legacy DVR audio patch syncing removed). */
         constexpr size_t MallocBufferSize = 96_KB;
         alignas(os::MemoryPageSize) constinit u8 g_malloc_buffer[MallocBufferSize];
 
@@ -567,58 +563,7 @@ namespace ams {
          * Nothing touches nvdrv/VIC unless sdmc:/applet-mitm.armed exists and
          * contains "vic". Default is a pure observer, i.e. M7d behaviour. */
         /* Called once per flag at boot; the file is a single short line. */
-        /* v0.7.4: "Sound in no-record games" (common/sound_patch.hpp) is a copy
-         * of the bundled dvr-patches in atmosphere/exefs_patches. While it is
-         * on, refresh that copy from the bundle - an update of Switch Frame Tap
-         * brings patches for a new firmware, and am reads them next boot. */
-        void SyncSoundPatches() {
-            constexpr const char *Bundled = "sdmc:/config/switch-frame-tap/dvr-patches";
-            constexpr const char *Ours    = "sdmc:/atmosphere/exefs_patches/switch-frame-tap-sound";
-            fs::DirectoryEntryType t;
-            if (R_FAILED(fs::GetEntryType(std::addressof(t), Ours)) || t != fs::DirectoryEntryType_Directory) { return; }
-            fs::DirectoryHandle d;
-            if (R_FAILED(fs::OpenDirectory(std::addressof(d), Bundled, fs::OpenDirectoryMode_File))) { return; }
-            /* v0.7.13: from malloc for this moment at boot, not 44 KB of .bss
-             * (the System group, #15) */
-            struct Scratch { fs::DirectoryEntry entries[48]; u8 a[4096], b[4096]; };
-            std::unique_ptr<Scratch> scratch(new (std::nothrow) Scratch);
-            if (!scratch) { fs::CloseDirectory(d); return; }
-            fs::DirectoryEntry *entries = scratch->entries;
-            s64 n = 0;
-            const Result rr = fs::ReadDirectory(std::addressof(n), entries, d, 48);
-            fs::CloseDirectory(d);
-            if (R_FAILED(rr)) { return; }
-            u32 updated = 0, same = 0;
-            u8 *a = scratch->a, *b = scratch->b;
-            auto read_all = [](const char *path, u8 *buf, size_t cap, size_t *len) -> bool {
-                fs::FileHandle f;
-                if (R_FAILED(fs::OpenFile(std::addressof(f), path, fs::OpenMode_Read))) { return false; }
-                s64 sz = 0;
-                bool ok = R_SUCCEEDED(fs::GetFileSize(std::addressof(sz), f)) && sz > 0 && static_cast<size_t>(sz) <= cap &&
-                          R_SUCCEEDED(fs::ReadFile(f, 0, buf, static_cast<size_t>(sz)));
-                fs::CloseFile(f);
-                *len = ok ? static_cast<size_t>(sz) : 0;
-                return ok;
-            };
-            for (s64 i = 0; i < n; ++i) {
-                const char *name = entries[i].name;
-                const size_t nl = std::strlen(name);
-                if (nl < 5 || (std::strcmp(name + nl - 4, ".ips") != 0 && std::strcmp(name + nl - 4, ".IPS") != 0)) { continue; }
-                char from[256], to[256];
-                std::snprintf(from, sizeof(from), "%s/%s", Bundled, name);
-                std::snprintf(to, sizeof(to), "%s/%s", Ours, name);
-                size_t la = 0, lb = 0;
-                if (!read_all(from, a, sizeof(scratch->a), std::addressof(la))) { continue; }
-                if (read_all(to, b, sizeof(scratch->b), std::addressof(lb)) && la == lb && std::memcmp(a, b, la) == 0) { ++same; continue; }
-                fs::DeleteFile(to);
-                fs::FileHandle f;
-                if (R_SUCCEEDED(fs::CreateFile(to, static_cast<s64>(la))) && R_SUCCEEDED(fs::OpenFile(std::addressof(f), to, fs::OpenMode_Write))) {
-                    if (R_SUCCEEDED(fs::WriteFile(f, 0, a, la, fs::WriteOption::Flush))) { ++updated; }
-                    fs::CloseFile(f);
-                }
-            }
-            mitm::applet::LogLine("sound in no-record games: on (dvr-patches, %u current, %u refreshed from the bundle)", same, updated);
-        }
+
 
         size_t ReadFileText(const char *path, char *buf, size_t cap) {
             fs::FileHandle f;
@@ -664,7 +609,10 @@ namespace ams {
                 return;
             }
             static char ini[4096];
-            const size_t n = ReadFileText("sdmc:/config/switch-frame-tap/config.ini", ini, sizeof(ini));
+            size_t n = ReadFileText("sdmc:/config/switch-ambilight/config.ini", ini, sizeof(ini));
+            if (n == 0) {
+                n = ReadFileText("sdmc:/config/switch-frame-tap/config.ini", ini, sizeof(ini));
+            }
             mitm::applet::AmbiApply(ambiset::Parse(ini, n));
             g_arm_len = mitm::applet::armfile::BuildReleaseArm(ini, n, g_arm_buf, sizeof(g_arm_buf));
         }
@@ -685,7 +633,6 @@ namespace ams {
             mitm::applet::g_shot_mask.store(mitm::applet::armfile::Number(g_arm_buf, g_arm_len, "shotmask", 0) & sft::shotbuttons::AllButtons);
             mitm::applet::g_shot_capture.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotcap"));
             mitm::applet::g_shot_album.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "shotalbum"));
-            mitm::applet::g_audio_enabled.store(mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "audio"));
             mitm::applet::g_nvab_armed = mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nvab");
             /* on unless config sets detach_on_home=0 (nodethome) */
             mitm::applet::g_detach_on_home = !mitm::applet::armfile::Contains(g_arm_buf, g_arm_len, "nodethome");
@@ -801,11 +748,6 @@ namespace ams {
         void TryUsbEnumerate() {
             if (!g_usb_armed) {
                 mitm::applet::LogLine("   usb: not armed (add \"usb\" to the arm file)");
-                return;
-            }
-            /* v0.4: webcam mode describes a UVC camera instead */
-            if (mitm::applet::g_uvc_mode) {
-                static_cast<void>(mitm::applet::UvcSetupDevice());
                 return;
             }
             mitm::applet::LogLine("---- USB device enumeration (usb:ds) ----");
@@ -1151,29 +1093,26 @@ namespace ams {
                                   HOSVER_MAJOR(hv), HOSVER_MINOR(hv), HOSVER_MICRO(hv),
                                   ATMOSPHERE_RELEASE_VERSION_MAJOR, ATMOSPHERE_RELEASE_VERSION_MINOR, ATMOSPHERE_RELEASE_VERSION_MICRO);
         }
-        SyncSoundPatches();
+        // Historical DVR/audio patch syncing removed in v0.6.
 
         mitm::applet::g_vic_armed   = ArmFileContains("vic");
         mitm::applet::g_vic_execute = ArmFileContains("exec");
         mitm::applet::g_dbg_armed   = ArmFileContains("dbg");
         mitm::applet::g_dump_armed  = ArmFileContains("dump");
-        g_usb_armed                 = ArmFileContains("usb");
-        mitm::applet::g_uvc_mode    = ArmFileContains("uvc");
-        mitm::applet::g_uvc_raw     = mitm::applet::g_uvc_mode && ArmFileContains("uvcraw");   /* v0.7.7: webcam-any */
+        g_usb_armed                 = false; /* Ambilight never claims USB device mode */
         mitm::applet::g_net_armed   = ArmFileContains("net");
         mitm::applet::g_bench_armed   = ArmFileContains("bench");
-        mitm::applet::g_nvenc_armed   = ArmFileContains("nvenc");
+        mitm::applet::g_nvenc_armed   = false; /* legacy NVENC probes removed */
         mitm::applet::g_nvjpg_armed   = ArmFileContains("jpg");
         mitm::applet::g_nvjpg_quality = ArmFileNumber("q", 85);
         mitm::applet::g_nvjpg_attempts = ArmFileNumber("jat", 90);
         mitm::applet::g_sweep_armed   = ArmFileContains("sweep");
         mitm::applet::g_matrix_armed  = ArmFileContains("mtx");
-        mitm::applet::g_grcscan_armed = ArmFileContains("grcscan");
         mitm::applet::g_clk_armed     = ArmFileContains("clk");
         mitm::applet::g_jpgdec_armed  = ArmFileContains("jpgdec");
-        mitm::applet::g_nvgrc_armed   = ArmFileContains("nvgrc");
+        mitm::applet::g_nvgrc_armed   = false; /* GRC replay removed */
         mitm::applet::g_csc_armed     = ArmFileContains("csc");
-        mitm::applet::g_nvframe_armed = ArmFileContains("nvframe");
+        mitm::applet::g_nvframe_armed = false; /* encoder experiment removed */
         mitm::applet::g_nvframe_n     = ArmFileNumber("nvframe", 120);
         mitm::applet::g_nvstream_armed = ArmFileContains("nvstream");
         mitm::applet::g_nvstream_n    = ArmFileNumber("nvstream", 3600);
@@ -1187,7 +1126,7 @@ namespace ams {
         mitm::applet::g_ui_stream_armed = ArmFileContains("homemenu");   /* v0.7.14: the HOME menu streams too */
         g_screen_off.store(ArmFileContains("screenoff"), std::memory_order_relaxed);
         mitm::applet::g_early_collect = ArmFileContains("earlyoff") ? 0 : ArmFileContains("earlyab") ? 2 : 1;
-        mitm::applet::g_nv1080_armed  = ArmFileContains("nv1080");
+        mitm::applet::g_nv1080_armed  = false; /* 1080p encoder probe removed */
         mitm::applet::g_nv1080_n      = ArmFileNumber("nv1080", 120);
         mitm::applet::g_cap720_armed  = ArmFileContains("cap720");
         mitm::applet::g_anyfw_armed   = ArmFileContains("anyfw");
@@ -1197,9 +1136,8 @@ namespace ams {
         mitm::applet::g_shot_capture.store(ArmFileContains("shotcap"));
         mitm::applet::g_shot_album.store(ArmFileContains("shotalbum"));
         mitm::applet::NoteAlbumPath();   /* v0.7.11: for the manager's gallery */
-        mitm::applet::g_audio_enabled.store(ArmFileContains("audio"));
         mitm::applet::LogLine("install type from GetEntryType(sdmc:/applet-mitm.armed) rc=0x%x", mitm::applet::g_arm_probe_rc);
-        mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, sdmc:/config/switch-frame-tap/config.ini ->" : "TEST install, sdmc:/applet-mitm.armed",
+        mitm::applet::LogLine("%s: %.*s", mitm::applet::g_release_mode ? "release install, Ambilight config (legacy fallback) ->" : "TEST install, sdmc:/applet-mitm.armed",
                               static_cast<int>(g_arm_len), g_arm_buf);
         /* live is a mode of the H.264 stream: everything nvstream sets up, it needs */
         if (mitm::applet::g_live_armed) { mitm::applet::g_nvstream_armed = true; }
@@ -1207,7 +1145,7 @@ namespace ams {
         mitm::applet::LoadStreamEnabled();
         mitm::applet::LoadExcluded();
         if (!mitm::applet::g_live_armed) { mitm::applet::g_live_state.store(mitm::applet::LiveState_NotArmed); }
-        mitm::applet::g_nvp_armed     = ArmFileContains("nvp");
+        mitm::applet::g_nvp_armed     = false; /* P-frame experiment removed */
         mitm::applet::g_nvp_n         = ArmFileNumber("nvp", 30);
         mitm::applet::g_matrix_mode   = ArmFileNumber("mtx", 1);
         mitm::applet::g_stream_armed  = ArmFileContains("stream");
@@ -1220,14 +1158,14 @@ namespace ams {
         mitm::applet::g_stream_frames = ArmFileNumber("sframes", 600);
         mitm::applet::g_probe_delay_s = ArmFileNumber("wait", 120);
         mitm::applet::LogLine("ARMED FLAGS: vic=%d exec=%d dbg=%d dump=%d usb=%d bench=%d nvenc=%d "
-                              "jpg=%d sweep=%d mtx=%d stream=%d grc=%d grcscan=%d clk=%d jpgdec=%d nvgrc=%d csc=%d nvframe=%d(%u) nvstream=%d(%u, qp %u, gop %u) nvp=%d(%u) live=%d nv1080=%d(%u) wait=%u",
+                              "jpg=%d sweep=%d mtx=%d stream=%d grc=%d clk=%d jpgdec=%d nvgrc=%d csc=%d nvframe=%d(%u) nvstream=%d(%u, qp %u, gop %u) nvp=%d(%u) live=%d nv1080=%d(%u) wait=%u",
                               mitm::applet::g_vic_armed, mitm::applet::g_vic_execute,
                               mitm::applet::g_dbg_armed, mitm::applet::g_dump_armed,
                               g_usb_armed, mitm::applet::g_bench_armed,
                               mitm::applet::g_nvenc_armed, mitm::applet::g_nvjpg_armed,
                               mitm::applet::g_sweep_armed, mitm::applet::g_matrix_armed,
                               mitm::applet::g_stream_armed, mitm::applet::g_grc_armed,
-                              mitm::applet::g_grcscan_armed, mitm::applet::g_clk_armed,
+                              mitm::applet::g_clk_armed,
                               mitm::applet::g_jpgdec_armed, mitm::applet::g_nvgrc_armed,
                               mitm::applet::g_csc_armed, mitm::applet::g_nvframe_armed, mitm::applet::g_nvframe_n,
                               mitm::applet::g_nvstream_armed, mitm::applet::g_nvstream_n, mitm::applet::g_nvstream_qp,
@@ -1297,8 +1235,6 @@ namespace ams {
         mitm::applet::StartControlService();
         mitm::applet::StartAppWatch();
         mitm::applet::StartShotInput();   /* idle, and hid untouched, until screenshots are on */
-        mitm::applet::StartAudio();
-        mitm::applet::SoundProbeStart();   /* v0.7.14 research: off without probe-sound.txt */
         mitm::applet::OvlProbeStart();     /* v0.7.14 research: off without probe-ovl.txt */
         mitm::applet::StartNet();         /* v0.7: only with "net"; waits for the console to be online */       /* idle, and grc:d untouched, until audio is on */
         mitm::applet::StartVicWorker();
@@ -1335,7 +1271,7 @@ namespace ams {
         if (mitm::applet::g_hb_docked.load()) { mitm::applet::LogLine("am: homebrew from the Homebrew Menu is told the console is docked (homebrew_docked)"); }
         if (ArmFileContains("noam")) { mitm::applet::LogLine("am: not wrapped (noam)"); } else { mitm::applet::StartAmMitm(); }
         /* v0.7.17: a game's audout:u - its own PCM for the stream when nothing else carries its sound (PokeMMO) */
-        if (ArmFileContains("noaudout")) { mitm::applet::LogLine("audout: not wrapped (noaudout)"); } else { mitm::applet::StartAudOutMitm(); }
+        /* WLED-only: never intercept audout:u or start an audio recorder. */
         /* v0.1.1: after vi:u, and wrapping only the running application's own
          * sessions (ShouldMitm asks pm:dmnt) */
         /* v0.7.1: "nohb" (config homebrew = 0, not in the manager) leaves vi:m
@@ -1400,11 +1336,11 @@ namespace ams::mitm::applet {
      * these globals at the start of a session; the request makes it end the
      * current one (StreamEnd::Reconfigure) so the next starts with them. */
     void ReloadReleaseConfig() {
-        if (!g_release_mode) { LogLine("sftap: ReloadConfig ignored - test install (arm file)"); return; }
+        if (!g_release_mode) { LogLine("ambi: ReloadConfig ignored - test install (arm file)"); return; }
         ::ams::g_arm_loaded = false;
         ::ams::LoadArm();
         ::ams::ApplySessionSettings();
-        LogLine("sftap: config reloaded -> %.*s", static_cast<int>(::ams::g_arm_len), ::ams::g_arm_buf);
+        LogLine("ambi: config reloaded -> %.*s", static_cast<int>(::ams::g_arm_len), ::ams::g_arm_buf);
         g_reconfig_request.store(true, std::memory_order_relaxed);
     }
 
@@ -1490,7 +1426,7 @@ namespace ams::mitm::applet {
      * called on the VIC worker thread, the one thread that sends over USB, and
      * never during a stream session. Webcam mode keeps its camera. */
     void UsbFollowStreamSwitch() {
-        if (!::ams::g_usb_armed || g_uvc_mode) { return; }
+        if (!::ams::g_usb_armed) { return; }
         const bool on = g_stream_enabled.load(std::memory_order_relaxed);
         if (!on && !g_usb_released && ::ams::g_usb_ep_in != nullptr) {
             static_cast<void>(usbDsEndpoint_Cancel(::ams::g_usb_ep_in));
@@ -1531,15 +1467,6 @@ namespace ams::mitm::applet {
             return true;
         }
         if (!UsbReady()) { return false; }
-        /* v0.4: a webcam's "viewer" is a host that committed a stream */
-        if (g_uvc_mode) {
-            for (u32 t = 0; !g_uvc_streaming.load(std::memory_order_relaxed); t += 50) {
-                if (t >= timeout_ms) { return false; }
-                os::SleepThread(TimeSpan::FromMilliSeconds(50));
-            }
-            /* committed - but after a stall, only once the host reads again */
-            return !UvcHostStalled() || UvcHostReading(timeout_ms);
-        }
         alignas(0x1000) static u8 hello[0x1000];
         const u32 h[8] = { 0x52544653u, 2u, 0, 0, 0, 0, 0, 0 };   /* "SFTR", v2, all else 0: length 0 */
         std::memcpy(hello, h, sizeof(h));
@@ -1564,7 +1491,6 @@ namespace ams::mitm::applet {
      * dead connection and reconnected each time (logs/v0717-test1). About once
      * a second: the USB probe's empty header, or the network status. */
     void ViewerKeepAlive() {
-        if (g_uvc_mode) { return; }
         static u64 s_ns = 0;
         const u64 now = armTicksToNs(armGetSystemTick());
         if (now - s_ns < UINT64_C(1000000000)) { return; }
@@ -1573,7 +1499,7 @@ namespace ams::mitm::applet {
     }
 
     bool UsbReady() {
-        if (::ams::g_usb_ep_in == nullptr && !g_uvc_mode) { return false; }
+        if (::ams::g_usb_ep_in == nullptr) { return false; }
         UsbState st = UsbState_Detached;
         if (R_FAILED(usbDsGetState(std::addressof(st)))) { return false; }
         return st == UsbState_Configured;
@@ -1645,7 +1571,7 @@ namespace ams::mitm::applet {
     namespace { bool g_bye_posted = false; u32 g_bye_urb = 0; }
 
     bool UsbViewerSaidBye() {
-        if (g_tx_net.load(std::memory_order_relaxed) || g_uvc_mode || ::ams::g_usb_ep_out == nullptr) { return false; }
+        if (g_tx_net.load(std::memory_order_relaxed) || ::ams::g_usb_ep_out == nullptr) { return false; }
         UsbDsEndpoint *ep = ::ams::g_usb_ep_out;
         if (!g_bye_posted) {
             eventClear(std::addressof(ep->CompletionEvent));

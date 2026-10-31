@@ -9,7 +9,7 @@ NV12 edge sampler (114 LEDs) -> DDP UDP port 4048 -> WLED ESP32
                     Tesla overlay (.ovl)  Homebrew (.nro)
 ```
 
-The `.ovl` and `.nro` update the legacy `config/switch-frame-tap/config.ini` file. They use the existing `sftap` IPC service to apply a change. The runtime reads the new `ambi_*` settings and restarts the capture session.
+The `.ovl` and `.nro` update `config/switch-ambilight/config.ini`, migrating the legacy `config/switch-frame-tap/config.ini` only on the first save. They use the existing `sftap` IPC service to apply a change. The runtime reads the new `ambi_*` settings and restarts the capture session.
 
 C20 intercepts game graphics and performs the color extraction. C21 is a separate boot launcher/memory donor, retained because C20 uses the upstream startup and memory allocation model. The original Switch Frame Tap viewer interfaces are not required. The internal capture implementation and legacy config/service names still need refactoring.
 

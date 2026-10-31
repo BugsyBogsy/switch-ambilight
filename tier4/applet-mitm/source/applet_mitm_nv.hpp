@@ -98,7 +98,6 @@ namespace ams::mitm::applet {
     extern bool g_sweep_armed;
     extern bool g_stream_auto;
     extern bool g_matrix_armed;
-    extern bool g_grcscan_armed;
     extern bool g_jpgdec_armed;   /* M76: NVJPG decode positive control */
     extern bool g_nvgrc_armed;    /* M80: grc's IDR job replayed from our channel */
     extern bool g_csc_armed;      /* M82: VIC colour-matrix probe sweep */

@@ -1,12 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p /tmp/switch-ambilight-tests
+TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_DIR"' EXIT
 CXX="${CXX:-g++}"
-"$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tests/settings_test.cpp" -o /tmp/switch-ambilight-tests/settings
-/tmp/switch-ambilight-tests/settings
-"$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tier4/applet-mitm/test/ambilight_test.cpp" -o /tmp/switch-ambilight-tests/ambilight
-/tmp/switch-ambilight-tests/ambilight
+
+# Prevent Windows CRLF line endings from breaking scripts under WSL/Linux.
+for script in "$ROOT"/scripts/*.sh "$ROOT"/tier4/applet-mitm/build.sh; do
+    bash -n "$script"
+    if LC_ALL=C grep -q "$(printf '\r')" "$script"; then
+        echo "ERROR: CRLF line endings in $script" >&2
+        exit 1
+    fi
+done
+
+"$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tests/settings_test.cpp" -o "$TEST_DIR/settings"
+"$TEST_DIR/settings"
+"$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tier4/applet-mitm/test/ambilight_test.cpp" -o "$TEST_DIR/ambilight"
+"$TEST_DIR/ambilight"
 "$CXX" -std=c++20 -O2 -Wall -Wextra -Werror -I "$ROOT/tier4/applet-mitm/source" \
- "$ROOT/tier4/applet-mitm/test/armfile_test.cpp" -o /tmp/switch-ambilight-tests/armfile
-/tmp/switch-ambilight-tests/armfile
+    "$ROOT/tier4/applet-mitm/test/armfile_test.cpp" -o "$TEST_DIR/armfile"
+"$TEST_DIR/armfile"
+"$CXX" -std=c++20 -O2 -Wall -Wextra -Werror "$ROOT/tests/config_migration_test.cpp" -o "$TEST_DIR/config_migration"
+mkdir "$TEST_DIR/migration"
+(cd "$TEST_DIR/migration" && "$TEST_DIR/config_migration")
+
+# Verify standalone cleanup without needing the Switch toolchain.
+python3 "$ROOT/tests/legacy_audio_cleanup_test.py"
+
+python3 "$ROOT/tests/legacy_nvenc_cleanup_test.py"
+
+python3 "$ROOT/tests/ambilight_session_isolation_test.py"
+
+python3 "$ROOT/tests/streaming_cleanup_test.py"
+
+python3 "$ROOT/tests/slot_content_probe_test.py"
+
+python3 "$ROOT/tests/grc_audio_cleanup_test.py"
+
+python3 "$ROOT/tests/uvc_cleanup_test.py"

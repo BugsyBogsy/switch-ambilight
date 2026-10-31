@@ -1,4 +1,4 @@
-// Switch Ambilight overlay v0.5. GPL-2.0-only.
+// Switch Ambilight overlay v0.6. GPL-2.0-only.
 #define TESLA_INIT_IMPL
 #include <tesla.hpp>
 #include <cstdio>
@@ -39,7 +39,7 @@ void Reload() {if(Connect()) serviceDispatch(&g_service,2);}
 void Enable(bool on) {if(Connect()) { const u8 v=on?1:0;serviceDispatchIn(&g_service,1,v);}}
 int Number(const char* key,int def) {
     std::string v;
-    tsl::hlp::doWithSDCardHandle([&]{sftini::Get(key,&v);});
+    tsl::hlp::doWithSDCardHandle([&]{ambiini::Get(key,&v);});
     if(v.empty())return def;
     int val=0;
     for(char c:v) {if(c<'0'||c>'9')return def; val=val*10+(c-'0');if(val>255)return def;}
@@ -48,7 +48,7 @@ int Number(const char* key,int def) {
 bool SaveNumber(const char* key,int value) {
     char s[12];std::snprintf(s,sizeof(s),"%d",value);
     bool ok=false;
-    tsl::hlp::doWithSDCardHandle([&]{ok=sftini::Set(key,s);});
+    tsl::hlp::doWithSDCardHandle([&]{ok=ambiini::Set(key,s);});
     if(ok)Reload();
     return ok;
 }
@@ -65,7 +65,7 @@ const char* Activity(u32 state) {
 class MainGui : public tsl::Gui {
 public:
     tsl::elm::Element* createUI() override {
-        auto *f=new tsl::elm::OverlayFrame("Switch Ambilight","v0.5");
+        auto *f=new tsl::elm::OverlayFrame("Switch Ambilight","v0.6");
         auto *list=new tsl::elm::List();
         Status st{};bool present=Get(&st);
         list->addItem(new tsl::elm::CategoryHeader("114 LEDs / WLED"));
@@ -117,7 +117,7 @@ public:
         list->addItem(new tsl::elm::CategoryHeader("Network"));
         auto *ip=new tsl::elm::ListItem("WLED IP (edit in NRO)");
         std::string ipstr="192.168.1.50";
-        tsl::hlp::doWithSDCardHandle([&] {sftini::Get("ambi_ip",&ipstr);});
+        tsl::hlp::doWithSDCardHandle([&] {ambiini::Get("ambi_ip",&ipstr);});
         ip->setValue(ipstr.c_str(),false);
         list->addItem(ip);
         f->setContent(list);
