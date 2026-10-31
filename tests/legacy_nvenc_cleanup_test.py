@@ -19,4 +19,10 @@ assert "struct NvfSession" in source
 assert "NvfEncode(" not in source, "Unused encoder wrapper restored"
 assert "NvfBitsLen(" not in source, "Unused H.264 length decoder restored"
 assert "NvfSubmit(" in source and "NvfWaitDone(" in source, "Shared encoder helper moved unexpectedly"
+# A previous source-deletion script matched NvfJob{} (default argument) as
+# the function opening brace, leaving the stray ')' and function body behind.
+# Guard against this class of syntactically invalid orphaned function tail.
+import re
+assert not re.search(r"(?m)^\s*\)\s*\{\s*$", source), "Orphaned function signature tail found"
+assert "NvfSubmit(x, pic_index, j," not in source, "Orphaned NvfEncode body found"
 print("OK: legacy NVENC probes and unused helpers removed; VIC/WLED retained")

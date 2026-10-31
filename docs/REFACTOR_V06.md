@@ -48,3 +48,7 @@ Removed NVENC magic/host1x probe, GRC IDR replay, and standalone 720p IDR, P-fra
 The removed NVENC experiment call sites left two unused static helpers, `NvfEncode` and `NvfBitsLen`, which break `-Werror=unused-function`. Both are now deleted; `NvfSubmit` and `NvfWaitDone` remain because the old viewer/encoder is still present.
 
 Packaging now requires `dist/.build-success`, recorded **only** after the full build succeeds, matching the current Git HEAD and all four binary SHA-256 digests. A failed build clears the stamp and previously staged ZIP, so a prior artifact cannot silently be shipped. Re-run `bash scripts/build.sh` before `bash scripts/package.sh` after each checkout or code change.
+
+### ARM64 parse repair (v0.6 NVENC refactor)
+
+The prior function-removal routine mistakenly treated the default argument `NvfJob{}` as the beginning of `NvfEncode`'s function body, leaving ` ) { ... }` at file scope and causing `expected unqualified-id before ')' token`. The complete leftover function body is now removed; a regression guard detects an orphan signature/body. The full ARM64 build and Mariko test remain required.

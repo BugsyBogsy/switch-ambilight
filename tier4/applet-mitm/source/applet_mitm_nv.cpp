@@ -5315,12 +5315,6 @@ namespace ams::mitm::applet {
             std::memcpy(std::addressof(pi), x.a + L.off_status, 4);
             return pi == pic_index;
         }
-) {
-            u32 fence = 0;
-            u64 t0 = 0;
-            if (NvfSubmit(x, pic_index, j, std::addressof(fence), std::addressof(t0)) != 0) { *enc_ns = 0; return 1; }
-            return NvfWaitDone(x, pic_index, fence, t0, st, enc_ns);
-        }
 
         /* v0.7.8: a 4-byte pixel's offset in any block-linear RGBA surface -
          * GOBs of 64 bytes x 8 rows (512 B), 2^bh_log2 GOBs to a block. MK8's

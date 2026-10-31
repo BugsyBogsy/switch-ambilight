@@ -1,5 +1,8 @@
 ## Unreleased - v0.6.0 (refactor candidate)
 
+- Fix orphaned `NvfEncode` function body after a source-removal script mistook the `NvfJob{}` default argument for the opening brace.
+- Add a regression check for stray function-signature tails.
+
 - Remove orphan `NvfEncode` and `NvfBitsLen` functions after removing NVENC test callers (fixes ARM64 -Werror=unused-function).
 - Block packaging stale NSPs after unsuccessful builds by checking a successful-build stamp, current Git revision and output checksums.
 - Prevent sysmodule build wrapper from copying outdated NSP outputs on failed compilations.
